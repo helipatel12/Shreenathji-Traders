@@ -1,0 +1,193 @@
+// DRAFT — Firestore security rules.
+//
+// rules.md §6 requires explicit owner confirmation before any change to
+// this file is deployed. This is a starting draft only — do not run
+// `firebase deploy --only firestore:rules` against the real project
+// until the owner has confirmed it.
+//
+// Intent (for review):
+// - A user can only read/write within their own business
+//   (businesses/{businessId}) — no cross-business access.
+// - "owner" can read/write everything in their business, including
+//   settings/users/rates.
+// - "staff" can create/edit bills, payments, and silak entries, but not
+//   settings, rates, or user management (prd.md §3).
+// - "ca" (accountant) is read-only across the whole business (prd.md §3,
+//   §4.7).
+// - Phase 1 bootstrap (see src/firebase/firestore.js's
+//   getOrCreateUserOnFirstLogin): the very first person to ever sign
+//   in to this deployment creates the business doc and their own
+//   "owner" user record together, before any user doc exists to check
+//   isOwner()/isMember() against. The rules below allow exactly that
+//   one bootstrap write and nothing more — any signed-in user may
+//   create businesses/{businessId} and their own user doc as 'owner'
+//   ONLY if the business doesn't exist yet; once it exists, only an
+//   existing owner can write there. This matches a 1-5 user tool
+//   (prd.md §5): the real owner is expected to be the first person to
+//   open the freshly-deployed app.
+// - Phase 8 staff/CA invites: there's no Admin SDK (rules.md §2), so
+//   the owner can't create someone else's Firebase Auth account
+//   directly. Instead the owner pre-authorizes an email at
+//   invites/{lowercased email} with a role; the invited person
+//   creates their own account and is allowed to create THEIR OWN
+//   users/{uid} doc, but only with the role the invite specifies —
+//   they can't grant themselves 'owner' or a different role than what
+//   was actually offered. The invites/{id} doc ID is always the
+//   invitee's own lowercased email specifically so a not-yet-a-member
+//   user can check "was I invited?" via a targeted `get` on their own
+//   ID, without `list` access that would leak who else is invited.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    }
+
+    function role(businessId) {
+      return userDoc(businessId).data.role;
+    }
+
+    function isMember(businessId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    }
+
+    function isOwner(businessId) {
+      return isMember(businessId) && role(businessId) == 'owner';
+    }
+
+    function isStaffOrOwner(businessId) {
+      return isMember(businessId) && role(businessId) in ['owner', 'staff'];
+    }
+
+    function businessExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    // The signer's own pending invite, if any — used to decide what
+    // role (staff/ca, never owner) they're allowed to create their
+    // users/{uid} doc with.
+    function ownInvite(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(request.auth.token.email.lower()));
+    }
+
+    function hasPendingInvite(businessId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/invites/$(request.auth.token.email.lower())) &&
+        ownInvite(businessId).data.status == 'pending';
+    }
+
+    // Voiding a bill or payment (Phase 9 follow-up: "admin can void")
+    // is owner-only, even though everyday edits to the same
+    // bill/payment are staff+owner. Distinguishes the two by checking
+    // whether THIS specific write is changing isVoided — a normal
+    // weight/amount correction leaves it alone and stays
+    // isStaffOrOwner; a write that flips isVoided needs isOwner too.
+    // `get(..., false)` treats a never-set field as false, so this
+    // works correctly for records created before voiding existed.
+    function isVoidingUnchanged() {
+      return request.resource.data.get('isVoided', false) == resource.data.get('isVoided', false);
+    }
+
+    match /businesses/{businessId} {
+      // Any signed-in user may check whether the business exists yet
+      // (needed for the bootstrap check itself) as well as read it
+      // once they're a member.
+      allow get: if isSignedIn();
+      allow update, delete: if isOwner(businessId);
+      // Bootstrap create: only when nothing exists yet for this id.
+      allow create: if isSignedIn() && !businessExists(businessId);
+
+      match /users/{userId} {
+        // A signed-in user may always check their OWN record — this
+        // has to work even when the record doesn't exist yet, since
+        // that's exactly what the bootstrap flow (firestore.js) needs
+        // to determine on first login. Restricting this to isMember()
+        // would be circular: isMember() itself checks whether this
+        // same doc exists, so a brand-new user could never even find
+        // out they have no record yet — every first-ever read would
+        // be denied before Firestore could report "not found."
+        // Listing the full team, by contrast, stays member-only.
+        allow get: if isSignedIn() && (request.auth.uid == userId || isMember(businessId));
+        allow list: if isMember(businessId);
+        allow update, delete: if isOwner(businessId);
+        // Three ways a users/{userId} doc can be created:
+        //   1. An existing owner creates/edits any user record.
+        //   2. Bootstrap: the signer creates their OWN record, as
+        //      'owner', only while the business doc doesn't exist yet.
+        //   3. Invite acceptance (Phase 8): the signer creates their
+        //      OWN record, with EXACTLY the role their pending invite
+        //      specifies — not whatever role they'd like.
+        allow create: if isOwner(businessId) ||
+          (isSignedIn() &&
+            request.auth.uid == userId &&
+            !businessExists(businessId) &&
+            request.resource.data.role == 'owner') ||
+          (isSignedIn() &&
+            request.auth.uid == userId &&
+            businessExists(businessId) &&
+            hasPendingInvite(businessId) &&
+            request.resource.data.role == ownInvite(businessId).data.role);
+      }
+
+      match /invites/{inviteId} {
+        // A signed-in user may always check their OWN invite (doc ID
+        // == their own lowercased email) — same reasoning as users'
+        // self-get above: this has to work before they're a member.
+        allow get: if isSignedIn() && request.auth.token.email.lower() == inviteId;
+        // The full invite list is owner-only — staff/ca shouldn't see
+        // who else has been invited (prd.md §3: staff can't manage
+        // users or settings).
+        allow list: if isOwner(businessId);
+        allow create, delete: if isOwner(businessId);
+        // The owner can change anything; the invited person may ONLY
+        // flip their own still-pending invite to 'accepted' — nothing
+        // else about it — as part of claiming their account.
+        allow update: if isOwner(businessId) ||
+          (isSignedIn() &&
+            request.auth.token.email.lower() == inviteId &&
+            resource.data.status == 'pending' &&
+            request.resource.data.status == 'accepted');
+      }
+
+      match /veparis/{vepariId} {
+        allow read: if isMember(businessId);
+        allow write: if isOwner(businessId);
+      }
+
+      match /bills/{billId} {
+        allow read: if isMember(businessId);
+        allow create: if isStaffOrOwner(businessId);
+        // Everyday edits (weight/rate/farmer corrections) stay
+        // staff+owner; only an owner may flip isVoided — see
+        // isVoidingUnchanged() above.
+        allow update: if isStaffOrOwner(businessId) &&
+          (isVoidingUnchanged() || isOwner(businessId));
+        allow delete: if false; // append-only per architecture.md §7 — no deletes
+      }
+
+      match /payments/{paymentId} {
+        allow read: if isMember(businessId);
+        allow create: if isStaffOrOwner(businessId);
+        allow update: if isStaffOrOwner(businessId) &&
+          (isVoidingUnchanged() || isOwner(businessId));
+        allow delete: if false; // append-only per architecture.md §7 — no deletes
+      }
+
+      match /silakEntries/{entryId} {
+        allow read: if isMember(businessId);
+        // Auto entries are derived and shouldn't be hand-edited; the
+        // client only ever writes manual entries directly (prd.md §4.4).
+        allow create, update, delete: if isStaffOrOwner(businessId) &&
+          (resource == null || resource.data.isManual == true);
+      }
+    }
+  }
+}
