@@ -1,13 +1,10 @@
-// DRAFT — Firebase Storage security rules (bill photos).
-// Same review requirement as firestore.rules — see the note there.
+// Storage is unused (bill photos dropped). Deny all access.
 rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    match /businesses/{businessId}/bills/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null &&
-        firestore.exists(/databases/(default)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -1,24 +1,27 @@
-// Standalone "Print" button, placed beside ExportMenu (owner-
-// requested: visible immediately, not a dropdown item one tap deep).
-// What it actually prints varies by caller: Bills' single-bill print
-// and Dakhla's single-vepari print use custom HTML templates matching
-// the real paper forms (features/bills/billPrint.js,
-// features/vepariDakhla/dakhlaPrint.js); list/summary/Rojmer/Silak
-// views — with no paper-form equivalent to match — use the generic
-// tabular PDF print (utils/export.js's printRows()). Either way, this
-// button is just the trigger; the caller supplies onClick.
-
 import { Printer } from 'lucide-react'
+import { useLocale } from '../context/LocaleContext'
 
-export default function PrintButton({ onClick, label = 'Print' }) {
+export default function PrintButton({ onClick, label, compact = false }) {
+  const { t } = useLocale()
+  const text = label === undefined ? t('common.print') : label
+
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-lg text-caption font-semibold text-ink-muted border border-border hover:border-accent hover:text-accent"
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick?.(e)
+      }}
+      className={
+        compact
+          ? 'action-btn action-btn-muted'
+          : 'inline-flex items-center gap-1.5 min-h-12 px-3 rounded-xl text-body font-semibold text-ink-muted border border-border hover:border-accent hover:text-accent'
+      }
+      aria-label={text || t('common.print')}
+      title={text || t('common.print')}
     >
-      <Printer size={16} strokeWidth={1.75} />
-      {label}
+      <Printer size={compact ? 14 : 18} strokeWidth={compact ? 2 : 1.75} />
+      {!compact && text}
     </button>
   )
 }

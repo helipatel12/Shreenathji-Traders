@@ -10,30 +10,31 @@ import { useBills } from './useBills'
 import { useVeparis } from './useVeparis'
 import { useBusiness } from './useBusiness'
 import { resolveRates, computeDakhlaLine, sumDakhlaLines, excludeVoided } from '../utils/calc'
+import { findVepari, vepariStableId } from '../utils/vepari'
 
-// Single vepari's full ledger — every bill of theirs, each turned
-// into a dakhla line via computeDakhlaLine(), sorted by date.
+function billMatchesVepari(bill, vepari) {
+  if (!vepari) return false
+  const billId = String(bill.vepariId)
+  const stable = vepariStableId(vepari)
+  return billId === stable || billId === String(vepari.id)
+}
+
 export function useVepariDakhla(vepariId) {
   const { bills: allBills, loading: billsLoading } = useBills()
   const { veparis, loading: veparisLoading } = useVeparis()
   const { business, loading: businessLoading } = useBusiness()
 
   const bills = useMemo(() => excludeVoided(allBills), [allBills])
-
-  const vepari = veparis.find((v) => String(v.id) === String(vepariId))
-  // Phase 8 made business.defaultRates real and owner-editable
-  // (Settings → Default rates) — resolveRates() still falls back to
-  // calc.js's hardcoded DEFAULT_RATES if the owner has never saved
-  // their own, per rules.md §3's resolution order.
+  const vepari = findVepari(veparis, vepariId)
   const rates = resolveRates(vepari, business)
 
   const lines = useMemo(() => {
-    if (!vepariId) return []
+    if (!vepariId || !vepari) return []
     return bills
-      .filter((b) => String(b.vepariId) === String(vepariId))
+      .filter((b) => billMatchesVepari(b, vepari))
       .map((bill) => ({ bill, ...computeDakhlaLine(bill, rates) }))
       .sort((a, b) => (a.bill.date < b.bill.date ? -1 : a.bill.date > b.bill.date ? 1 : 0))
-  }, [bills, vepariId, rates])
+  }, [bills, vepariId, vepari, rates])
 
   const totals = useMemo(() => sumDakhlaLines(lines), [lines])
 
@@ -46,11 +47,6 @@ export function useVepariDakhla(vepariId) {
   }
 }
 
-// All-veparis summary — one row per vepari with bills in the given
-// date range (inclusive), each resolving its OWN rates (a vepari with
-// customRates doesn't get lumped in with the business default). Used
-// by the "export all veparis for a date range" requirement (prd.md
-// §4.2) — see phases.md Phase 5.
 export function useAllVepariDakhlaSummary(fromDate, toDate) {
   const { bills: allBills, loading: billsLoading } = useBills()
   const { veparis, loading: veparisLoading } = useVeparis()
@@ -63,7 +59,7 @@ export function useAllVepariDakhlaSummary(fromDate, toDate) {
       .map((vepari) => {
         const rates = resolveRates(vepari, business)
         const vepariBills = bills.filter((b) => {
-          if (String(b.vepariId) !== String(vepari.id)) return false
+          if (!billMatchesVepari(b, vepari)) return false
           if (fromDate && b.date < fromDate) return false
           if (toDate && b.date > toDate) return false
           return true

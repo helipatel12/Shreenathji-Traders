@@ -1,25 +1,27 @@
-// The automatic "financial year closed" prompt — Phase 9. Rendered
-// from AppShell so it can appear over any screen the moment a
-// rollover is detected, not tied to one particular route. See
-// useYearEndArchive.js for the detection/build logic; this is just
-// the modal.
-
 import { useState } from 'react'
 import { useYearEndArchiveCheck, useYearEndArchiveBuilder } from '../hooks/useYearEndArchive'
-import gu from '../locales/gu.json'
+import { useLocale } from '../context/LocaleContext'
+import { useAuth } from '../hooks/useAuth'
 
 export default function YearEndArchivePrompt() {
+  const { t } = useLocale()
+  const { isOwner } = useAuth()
   const { shouldPrompt, closedFY, dismiss } = useYearEndArchiveCheck()
-  const { buildZip } = useYearEndArchiveBuilder(closedFY.start, closedFY.end)
+  const { loading, buildZip } = useYearEndArchiveBuilder(closedFY.start, closedFY.end)
   const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState('')
 
-  if (!shouldPrompt) return null
+  if (!isOwner || !shouldPrompt) return null
 
   async function handleDownload() {
     setDownloading(true)
+    setError('')
     try {
       await buildZip()
       dismiss()
+    } catch (err) {
+      console.error('Year-end archive failed:', err)
+      setError(t('archive.downloadFailed'))
     } finally {
       setDownloading(false)
     }
@@ -28,24 +30,27 @@ export default function YearEndArchivePrompt() {
   return (
     <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-30">
       <div className="card px-6 py-6 max-w-sm w-full">
-        <p className="text-body text-ink font-semibold mb-1">{gu.archive.promptTitle}</p>
-        <p className="text-caption text-ink-muted mb-5">{gu.archive.promptBody}</p>
+        <p className="text-body text-ink font-semibold mb-1">{t('archive.promptTitle')}</p>
+        <p className="text-caption text-ink-muted mb-5">{t('archive.promptBody')}</p>
+        {error && (
+          <p className="text-caption text-danger rounded-lg bg-red-50 px-3 py-2 mb-4">{error}</p>
+        )}
         <div className="flex gap-3">
           <button
             type="button"
             onClick={handleDownload}
-            disabled={downloading}
-            className="flex-1 min-h-11 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body disabled:opacity-40"
+            disabled={downloading || loading}
+            className="flex-1 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body disabled:opacity-40"
           >
-            {downloading ? gu.archive.preparing : gu.archive.downloadBackup}
+            {downloading || loading ? t('archive.preparing') : t('archive.downloadBackup')}
           </button>
           <button
             type="button"
             onClick={dismiss}
             disabled={downloading}
-            className="min-h-11 px-5 rounded-xl border border-border text-body text-ink-muted"
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
           >
-            {gu.archive.notNow}
+            {t('archive.notNow')}
           </button>
         </div>
       </div>

@@ -1,22 +1,7 @@
-// Phase 1 — routes on auth status (context/AuthContext.jsx):
-//   loading      -> minimal loading state (brief, first-paint only —
-//                    this is the initial Firebase Auth check, not
-//                    local ledger data, so it isn't covered by the
-//                    "never block on network" offline rule)
-//   signed-out   -> LoginScreen
-//   unauthorized -> signed in, but no user record for this business
-//                    (firebase/firestore.js) — explain and offer to
-//                    try a different account
-//   signed-in    -> AppShell (nav + header) wrapping the real routes
-//
-// Phase 2 adds the actual routes AppShell's nav links to — see
-// components/AppShell.jsx for the nav itself, phases.md for what
-// belongs on each screen and when.
-// Login is email + password (Firebase phone/SMS auth now requires the
-// paid Blaze plan — see src/firebase/auth.js's header comment).
-
 import { Routes, Route } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
+import { useLocale } from './context/LocaleContext'
+import LanguageToggle from './components/LanguageToggle'
 import LoginScreen from './features/auth/LoginScreen'
 import AppShell from './components/AppShell'
 import DashboardScreen from './features/dashboard/DashboardScreen'
@@ -25,25 +10,58 @@ import DakhlaScreen from './features/vepariDakhla/DakhlaScreen'
 import RojmerScreen from './features/rojmer/RojmerScreen'
 import SilakScreen from './features/jansaSilak/SilakScreen'
 import SettingsScreen from './features/settings/SettingsScreen'
+import UserManagementScreen from './features/admin/UserManagementScreen'
+import QueueMonitorScreen from './features/admin/QueueMonitorScreen'
+import ReportsScreen from './features/reports/ReportsScreen'
+import { SkeletonPage } from './components/Skeleton'
 
 function UnauthorizedScreen() {
   const { logout } = useAuth()
+  const { t } = useLocale()
   return (
     <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
       <div className="w-full max-w-sm card px-6 py-8 text-center">
         <p className="text-caption text-danger font-semibold uppercase tracking-wide mb-2">
-          Not set up yet
+          {t('auth.unauthorizedTitle')}
         </p>
-        <p className="text-body text-ink">
-          This account isn&rsquo;t registered for Shreenath Traders. Ask the
-          owner to add you in Settings, or try a different account.
-        </p>
+        <p className="text-body text-ink">{t('auth.unauthorizedBody')}</p>
         <button
           type="button"
           onClick={logout}
-          className="w-full mt-5 min-h-11 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
+          className="w-full mt-5 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
         >
-          Try a different account
+          {t('auth.tryDifferentAccount')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AuthErrorScreen() {
+  const { logout, error } = useAuth()
+  const { t } = useLocale()
+  return (
+    <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
+      <div className="w-full max-w-sm card px-6 py-8 text-center">
+        <p className="text-caption text-danger font-semibold uppercase tracking-wide mb-2">
+          {t('auth.errorTitle')}
+        </p>
+        <p className="text-body text-ink mb-2">{t('auth.errorBody')}</p>
+        {error?.message && (
+          <p className="text-caption text-ink-muted mb-4 break-words">{error.message}</p>
+        )}
+        <button
+          type="button"
+          onClick={logout}
+          className="w-full mt-2 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
+        >
+          {t('auth.tryDifferentAccount')}
         </button>
       </div>
     </div>
@@ -51,11 +69,24 @@ function UnauthorizedScreen() {
 }
 
 function LoadingScreen() {
+  const { t } = useLocale()
   return (
-    <div className="flex min-h-svh items-center justify-center bg-surface-muted">
-      <p className="font-numeric text-caption text-ink-muted uppercase tracking-wide">
-        Loading…
-      </p>
+    <div className="min-h-svh bg-surface-muted">
+      <div className="flex items-center justify-center pt-16 pb-8">
+        <div className="text-center">
+          <div
+            className="mx-auto mb-4 h-10 w-10 rounded-full border-2 border-accent border-t-transparent animate-spin"
+            aria-hidden
+          />
+          <p className="font-numeric text-caption text-ink-muted uppercase tracking-wide">
+            {t('common.loading')}
+          </p>
+          <p className="text-body text-ink mt-2">{t('auth.loadingAccount')}</p>
+        </div>
+      </div>
+      <div className="max-w-5xl mx-auto px-4 pb-10">
+        <SkeletonPage />
+      </div>
     </div>
   )
 }
@@ -65,6 +96,7 @@ function App() {
 
   if (status === 'loading') return <LoadingScreen />
   if (status === 'unauthorized') return <UnauthorizedScreen />
+  if (status === 'error') return <AuthErrorScreen />
 
   if (status === 'signed-in') {
     return (
@@ -75,7 +107,10 @@ function App() {
           <Route path="dakhla" element={<DakhlaScreen />} />
           <Route path="rojmer" element={<RojmerScreen />} />
           <Route path="silak" element={<SilakScreen />} />
+          <Route path="reports" element={<ReportsScreen />} />
           <Route path="settings" element={<SettingsScreen />} />
+          <Route path="admin/users" element={<UserManagementScreen />} />
+          <Route path="admin/queue" element={<QueueMonitorScreen />} />
         </Route>
       </Routes>
     )

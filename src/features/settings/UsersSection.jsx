@@ -10,20 +10,21 @@ import { Plus, X } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useUsers } from '../../hooks/useUsers'
 import { useInvites } from '../../hooks/useInvites'
-import gu from '../../locales/gu.json'
+import { useLocale } from '../../context/LocaleContext'
 import InviteForm from './InviteForm'
 
-function roleLabel(role) {
-  return gu.roles[role] ?? role
-}
-
 export default function UsersSection() {
+  const { t } = useLocale()
   const { user } = useAuth()
   const { users, loading: usersLoading } = useUsers()
   const { invites, loading: invitesLoading, addInvite, revokeInvite } = useInvites()
   const [showInviteForm, setShowInviteForm] = useState(false)
 
   const pendingInvites = invites.filter((i) => i.status === 'pending')
+
+  function roleLabel(role) {
+    return t(`roles.${role}`) ?? role
+  }
 
   async function handleInvite(values) {
     await addInvite({ ...values, invitedBy: user?.email })
@@ -34,16 +35,16 @@ export default function UsersSection() {
     <div className="card px-5 py-5 max-w-lg">
       <div className="flex items-center justify-between mb-4">
         <p className="text-caption text-accent font-semibold uppercase tracking-wide">
-          {gu.settings.usersTitle}
+          {t('settings.usersTitle')}
         </p>
         {!showInviteForm && (
           <button
             type="button"
             onClick={() => setShowInviteForm(true)}
-            className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-lg text-caption font-semibold text-accent hover:bg-accent-soft"
+            className="inline-flex items-center gap-1.5 min-h-12 px-3 rounded-lg text-caption font-semibold text-accent hover:bg-accent-soft"
           >
             <Plus size={16} strokeWidth={2} />
-            {gu.settings.inviteTitle}
+            {t('settings.inviteTitle')}
           </button>
         )}
       </div>
@@ -55,7 +56,7 @@ export default function UsersSection() {
       )}
 
       {usersLoading ? (
-        <p className="text-caption text-ink-muted">Loading…</p>
+        <p className="text-caption text-ink-muted">{t('common.loading')}</p>
       ) : (
         <ul className="divide-y divide-border mb-4">
           {users.map((u) => (
@@ -70,29 +71,33 @@ export default function UsersSection() {
         </ul>
       )}
 
-      {!invitesLoading && pendingInvites.length > 0 && (
+      {!invitesLoading && (
         <div>
           <p className="text-caption text-ink-muted uppercase tracking-wide mb-2">
-            {gu.settings.pendingInvitesLabel}
+            {t('settings.pendingInvitesLabel')}
           </p>
-          <ul className="space-y-1.5">
-            {pendingInvites.map((invite) => (
-              <li key={invite.id} className="flex items-center justify-between text-caption gap-2">
-                <span className="text-ink">
-                  {invite.email} · {roleLabel(invite.role)}
-                  {invite.location && ` · ${invite.location}`}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => revokeInvite(invite.email)}
-                  aria-label={`Revoke invite for ${invite.email}`}
-                  className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-danger shrink-0"
-                >
-                  <X size={16} strokeWidth={1.75} />
-                </button>
-              </li>
-            ))}
-          </ul>
+          {pendingInvites.length === 0 ? (
+            <p className="text-body text-ink-muted">{t('settings.noPendingInvites')}</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {pendingInvites.map((invite) => (
+                <li key={invite.id} className="flex items-center justify-between text-caption gap-2">
+                  <span className="text-ink">
+                    {invite.email} · {roleLabel(invite.role)}
+                    {invite.location && ` · ${invite.location}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => revokeInvite(invite.email)}
+                    aria-label={`${t('settings.revoke')} ${invite.email}`}
+                    className="min-h-12 min-w-12 inline-flex items-center justify-center text-ink-muted hover:text-danger shrink-0"
+                  >
+                    <X size={16} strokeWidth={1.75} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

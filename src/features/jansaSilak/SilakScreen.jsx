@@ -3,16 +3,19 @@
 // interpretation this screen displays — flagged there and in
 // memory.md as needing owner validation against real numbers.
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useJansaSilak, useJansaSilakRange } from '../../hooks/useJansaSilak'
-import { formatCurrency } from '../../utils/calc'
+import { useLocale } from '../../context/LocaleContext'
 import { todayKeyIST, monthBounds, financialYearBounds } from '../../utils/dates'
-import gu from '../../locales/gu.json'
 import ManualEntryForm from './ManualEntryForm'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
+import ReadOnlyBanner from '../../components/ReadOnlyBanner'
+import DataTable from '../../components/DataTable'
+import TableToolbar from '../../components/TableToolbar'
+import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import {
   buildDayRows,
@@ -22,16 +25,30 @@ import {
 } from './silakExport'
 
 function DayView() {
-  const { user } = useAuth()
+  const { user, canWrite, isOwner } = useAuth()
+  const { t, formatCurrency, formatDigits } = useLocale()
   const [date, setDate] = useState(todayKeyIST())
-  const [mode, setMode] = useState('list') // 'list' | 'add' | { edit }
+  const [mode, setMode] = useState('list')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [selectedKey, setSelectedKey] = useState(null)
+  const [search, setSearch] = useState('')
+  const [sideFilter, setSideFilter] = useState('')
   const { loading, day, addEntry, updateEntry, deleteEntry } = useJansaSilak(date)
 
   const editingEntry =
     typeof mode === 'object' && mode.edit != null
       ? day?.entries.find((e) => e.isManual && e.id === mode.edit)
       : null
+
+  const filteredEntries = useMemo(() => {
+    const entries = day?.entries || []
+    const q = search.trim().toLowerCase()
+    return entries.filter((entry) => {
+      if (sideFilter && entry.side !== sideFilter) return false
+      if (!q) return true
+      return String(entry.label || '').toLowerCase().includes(q)
+    })
+  }, [day, search, sideFilter])
 
   async function handleAdd(values) {
     await addEntry({ ...values, createdBy: user?.email })
@@ -63,48 +80,128 @@ function DayView() {
     printRows(buildDayRows(day), buildDayPdfColumns(), `Jansa Silak — ${date}`)
   }
 
+  function exportOne(entry, format) {
+    const rows = buildDayRows({
+      entries: [entry],
+      openingBalance: 0,
+      closingBalance: 0,
+    }).slice(0, 1)
+    const filename = `silak_${date}_${entry.key || entry.id || 'entry'}`
+    const title = `Jansa Silak — ${entry.label}`
+    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') exportRowsToCSV(rows, filename)
+    if (format === 'pdf') exportRowsToPDF(rows, buildDayPdfColumns(), filename, title)
+  }
+
+  function printOne(entry) {
+    const rows = buildDayRows({
+      entries: [entry],
+      openingBalance: 0,
+      closingBalance: 0,
+    }).slice(0, 1)
+    printRows(rows, buildDayPdfColumns(), `Jansa Silak — ${entry.label}`)
+  }
+
+  const columns = [
+    {
+      key: 'label',
+      header: t('silak.labelField'),
+      render: (entry) => (
+        <div>
+          <p className="font-semibold">{entry.label}</p>
+          {entry.isManual && (
+            <span className="badge badge-gray mt-1">{t('silak.manualBadge')}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'side',
+      header: t('silak.sideField'),
+      filter: {
+        value: sideFilter,
+        onChange: setSideFilter,
+        allLabel: t('silak.allSides'),
+        options: [
+          { value: 'jama', label: t('silak.jamaLabel') },
+          { value: 'udhar', label: t('silak.udharLabel') },
+        ],
+      },
+      render: (entry) =>
+        entry.side === 'jama' ? (
+          <span className="badge badge-green">{t('silak.jamaLabel')}</span>
+        ) : (
+          <span className="badge badge-red">{t('silak.udharLabel')}</span>
+        ),
+    },
+    {
+      key: 'amount',
+      header: t('silak.amountField'),
+      align: 'right',
+      render: (entry) => (
+        <span
+          className={`font-semibold ${entry.side === 'jama' ? 'text-success' : 'text-danger'}`}
+        >
+          {entry.side === 'jama' ? '+' : '−'}
+          {formatCurrency(entry.amount)}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      render: (entry) => (
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <PrintButton compact onClick={() => printOne(entry)} />
+          <ExportMenu
+            compact
+            onExportExcel={() => exportOne(entry, 'excel')}
+            onExportCSV={() => exportOne(entry, 'csv')}
+            onExportPDF={() => exportOne(entry, 'pdf')}
+          />
+          {entry.isManual && canWrite && (
+            <button
+              type="button"
+              className="action-btn action-btn-edit"
+              aria-label={t('common.edit')}
+              onClick={() => setMode({ edit: entry.id })}
+            >
+              <Pencil size={14} strokeWidth={2} />
+            </button>
+          )}
+          {entry.isManual && isOwner && (
+            <button
+              type="button"
+              className="action-btn action-btn-danger"
+              aria-label={t('common.delete')}
+              onClick={() => setConfirmDeleteId(entry.id)}
+            >
+              <Trash2 size={14} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div>
-      <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div>
-          <label className="block text-caption text-ink-muted mb-1.5">{gu.silak.dateField}</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-          />
-        </div>
-        {mode === 'list' && (
-          <button
-            type="button"
-            onClick={() => setMode('add')}
-            className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body"
-          >
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        {mode === 'list' && canWrite && (
+          <button type="button" onClick={() => setMode('add')} className="btn-primary ml-auto">
             <Plus size={18} strokeWidth={2} />
-            {gu.silak.addManualEntry}
+            {t('silak.addManualEntry')}
           </button>
-        )}
-        {day && day.entries.length > 0 && (
-          <>
-            <PrintButton onClick={handlePrint} />
-            <ExportMenu
-              label="Export day"
-              onExportExcel={() => doExport('excel')}
-              onExportCSV={() => doExport('csv')}
-              onExportPDF={() => doExport('pdf')}
-            />
-          </>
         )}
       </div>
 
-      {mode === 'add' && (
+      {mode === 'add' && canWrite && (
         <div className="card px-5 py-5 mb-4">
           <ManualEntryForm defaultDate={date} onSubmit={handleAdd} onCancel={() => setMode('list')} />
         </div>
       )}
 
-      {editingEntry && (
+      {editingEntry && canWrite && (
         <div className="card px-5 py-5 mb-4">
           <ManualEntryForm
             initialValues={{
@@ -120,68 +217,69 @@ function DayView() {
       )}
 
       {loading || !day ? (
-        <p className="text-caption text-ink-muted">Loading…</p>
+        <SkeletonTable rows={5} cols={3} />
       ) : (
         <>
           <div className="card px-4 py-3 mb-3 flex items-center justify-between">
-            <p className="text-body text-ink-muted">{gu.silak.openingLabel}</p>
+            <p className="text-body text-ink-muted">{t('silak.openingLabel')}</p>
             <p className="font-numeric text-body text-ink font-semibold">
               {formatCurrency(day.openingBalance)}
             </p>
           </div>
 
-          {day.entries.length === 0 ? (
-            <div className="card px-5 py-5 max-w-md mb-3">
-              <p className="text-body text-ink-muted">{gu.silak.noEntries}</p>
-            </div>
-          ) : (
-            <ul className="space-y-2 mb-3">
-              {day.entries.map((entry) => (
-                <li key={entry.key} className="card px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-body text-ink truncate">{entry.label}</p>
-                    <p className="text-caption text-ink-muted">
-                      {entry.side === 'jama' ? gu.silak.jamaLabel : gu.silak.udharLabel}
-                      {entry.isManual && <span> · {gu.silak.manualBadge}</span>}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <p
-                      className={`font-numeric text-body font-semibold ${
-                        entry.side === 'jama' ? 'text-accent' : 'text-danger'
-                      }`}
-                    >
-                      {entry.side === 'jama' ? '+' : '−'}
-                      {formatCurrency(entry.amount)}
-                    </p>
-                    {entry.isManual && (
+          <DataTable
+            columns={columns}
+            rows={filteredEntries}
+            rowKey="key"
+            selectedKey={selectedKey}
+            onRowClick={(entry) =>
+              setSelectedKey((k) => (k === entry.key ? null : entry.key))
+            }
+            empty={<p className="text-body text-ink-muted">{t('silak.noEntries')}</p>}
+            meta={t('common.showingCount', { count: formatDigits(filteredEntries.length) })}
+            toolbar={
+              <TableToolbar
+                search={search}
+                onSearchChange={setSearch}
+                searchPlaceholder={t('silak.searchPlaceholder')}
+                actions={
+                  <>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => {
+                        setDate(e.target.value)
+                        setSelectedKey(null)
+                      }}
+                      aria-label={t('silak.dateField')}
+                      className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                    />
+                    {day.entries.length > 0 && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => setMode({ edit: entry.id })}
-                          aria-label="Edit entry"
-                          className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-accent"
-                        >
-                          <Pencil size={16} strokeWidth={1.75} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(entry.id)}
-                          aria-label="Delete entry"
-                          className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-danger"
-                        >
-                          <Trash2 size={16} strokeWidth={1.75} />
-                        </button>
+                        <PrintButton onClick={handlePrint} />
+                        <ExportMenu
+                          label={t('silak.exportDay')}
+                          onExportExcel={() => doExport('excel')}
+                          onExportCSV={() => doExport('csv')}
+                          onExportPDF={() => doExport('pdf')}
+                        />
                       </>
                     )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                  </>
+                }
+              />
+            }
+            renderExpanded={(entry) => (
+              <p className="text-caption text-ink-muted">
+                {entry.side === 'jama' ? t('silak.jamaLabel') : t('silak.udharLabel')} ·{' '}
+                {formatCurrency(entry.amount)}
+                {entry.isManual ? ` · ${t('silak.manualBadge')}` : ''}
+              </p>
+            )}
+          />
 
-          <div className="card px-4 py-3 flex items-center justify-between bg-accent-soft">
-            <p className="text-body text-ink font-semibold">{gu.silak.closingLabel}</p>
+          <div className="card px-4 py-3 mt-3 flex items-center justify-between bg-accent-soft">
+            <p className="text-body text-ink font-semibold">{t('silak.closingLabel')}</p>
             <p className="font-numeric text-heading text-ink font-semibold">
               {formatCurrency(day.closingBalance)}
             </p>
@@ -192,21 +290,21 @@ function DayView() {
       {confirmDeleteId != null && (
         <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
           <div className="card px-5 py-5 max-w-sm w-full">
-            <p className="text-body text-ink mb-4">{gu.silak.deleteConfirm}</p>
+            <p className="text-body text-ink mb-4">{t('silak.deleteConfirm')}</p>
             <div className="flex gap-3">
               <button
                 type="button"
                 onClick={confirmDelete}
-                className="flex-1 min-h-11 rounded-xl bg-danger text-surface font-semibold text-body"
+                className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body"
               >
-                {gu.silak.confirmDelete}
+                {t('silak.confirmDelete')}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDeleteId(null)}
-                className="min-h-11 px-5 rounded-xl border border-border text-body text-ink-muted"
+                className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
               >
-                {gu.silak.cancel}
+                {t('silak.cancel')}
               </button>
             </div>
           </div>
@@ -217,14 +315,26 @@ function DayView() {
 }
 
 function RangeView({ mode }) {
+  const { t, formatCurrency, formatDigits } = useLocale()
   const today = todayKeyIST()
   const bounds = mode === 'month' ? monthBounds(today) : financialYearBounds(today)
   const [fromDate, setFromDate] = useState(bounds.start)
   const [toDate, setToDate] = useState(bounds.end)
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [sortDir, setSortDir] = useState('asc')
   const { loading, days } = useJansaSilakRange(fromDate, toDate)
 
+  const sortedDays = useMemo(() => {
+    const dir = sortDir === 'desc' ? -1 : 1
+    return days.slice().sort((a, b) => {
+      if (a.date < b.date) return -1 * dir
+      if (a.date > b.date) return 1 * dir
+      return 0
+    })
+  }, [days, sortDir])
+
   function doExport(format) {
-    const rows = buildRangeRows(days)
+    const rows = buildRangeRows(sortedDays)
     const filename = `silak_${mode}_${fromDate}_to_${toDate}`
     const title = `Jansa Silak — ${fromDate} to ${toDate}`
     if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
@@ -233,98 +343,170 @@ function RangeView({ mode }) {
   }
 
   function handlePrint() {
-    printRows(buildRangeRows(days), buildRangePdfColumns(), `Jansa Silak — ${fromDate} to ${toDate}`)
+    printRows(buildRangeRows(sortedDays), buildRangePdfColumns(), `Jansa Silak — ${fromDate} to ${toDate}`)
   }
+
+  function exportOne(day, format) {
+    const rows = buildRangeRows([day])
+    const filename = `silak_${day.date}`
+    const title = `Jansa Silak — ${day.date}`
+    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') exportRowsToCSV(rows, filename)
+    if (format === 'pdf') exportRowsToPDF(rows, buildRangePdfColumns(), filename, title)
+  }
+
+  function printOne(day) {
+    printRows(buildRangeRows([day]), buildRangePdfColumns(), `Jansa Silak — ${day.date}`)
+  }
+
+  const columns = [
+    {
+      key: 'date',
+      header: t('silak.dateField'),
+      filter: {
+        value: sortDir,
+        onChange: (value) => setSortDir(value || 'asc'),
+        allLabel: t('bills.sortDate'),
+        options: [
+          { value: 'asc', label: t('bills.sortDateOlder') },
+          { value: 'desc', label: t('bills.sortDateNewer') },
+        ],
+      },
+      render: (day) => (
+        <span className="font-numeric whitespace-nowrap">{formatDigits(day.date)}</span>
+      ),
+    },
+    {
+      key: 'opening',
+      header: t('silak.openingLabel'),
+      align: 'right',
+      render: (day) => formatCurrency(day.openingBalance),
+    },
+    {
+      key: 'jama',
+      header: t('silak.jamaLabel'),
+      align: 'right',
+      render: (day) => (
+        <span className="text-success">{formatCurrency(day.jamaTotal)}</span>
+      ),
+    },
+    {
+      key: 'udhar',
+      header: t('silak.udharLabel'),
+      align: 'right',
+      render: (day) => (
+        <span className="text-danger">{formatCurrency(day.udharTotal)}</span>
+      ),
+    },
+    {
+      key: 'closing',
+      header: t('silak.closingLabel'),
+      align: 'right',
+      render: (day) => (
+        <span className="font-semibold">{formatCurrency(day.closingBalance)}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      render: (day) => (
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <PrintButton compact onClick={() => printOne(day)} />
+          <ExportMenu
+            compact
+            onExportExcel={() => exportOne(day, 'excel')}
+            onExportCSV={() => exportOne(day, 'csv')}
+            onExportPDF={() => exportOne(day, 'pdf')}
+          />
+        </div>
+      ),
+    },
+  ]
 
   return (
     <div>
-      <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div>
-          <label className="block text-caption text-ink-muted mb-1.5">From</label>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-          />
-        </div>
-        <div>
-          <label className="block text-caption text-ink-muted mb-1.5">To</label>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-          />
-        </div>
-        {days.length > 0 && (
-          <>
-            <PrintButton onClick={handlePrint} />
-            <ExportMenu
-              label={`Export (${days.length} days)`}
-              onExportExcel={() => doExport('excel')}
-              onExportCSV={() => doExport('csv')}
-              onExportPDF={() => doExport('pdf')}
-            />
-          </>
-        )}
-      </div>
-
       {loading ? (
-        <p className="text-caption text-ink-muted">Loading…</p>
+        <SkeletonTable rows={5} cols={5} />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-body">
-            <thead>
-              <tr className="border-b border-border text-caption text-ink-muted text-left">
-                <th className="px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.silak.openingLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.silak.jamaLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.silak.udharLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.silak.closingLabel}</th>
-              </tr>
-            </thead>
-            <tbody className="font-numeric">
-              {days.map((day) => (
-                <tr key={day.date} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 whitespace-nowrap">{day.date}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(day.openingBalance)}</td>
-                  <td className="px-4 py-3 text-right text-accent">{formatCurrency(day.jamaTotal)}</td>
-                  <td className="px-4 py-3 text-right text-danger">{formatCurrency(day.udharTotal)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">
-                    {formatCurrency(day.closingBalance)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          rows={sortedDays}
+          rowKey="date"
+          selectedKey={selectedDate}
+          onRowClick={(day) =>
+            setSelectedDate((d) => (d === day.date ? null : day.date))
+          }
+          empty={<p className="text-body text-ink-muted">{t('silak.noRangeEntries')}</p>}
+          meta={t('common.showingCount', { count: formatDigits(sortedDays.length) })}
+          toolbar={
+            <TableToolbar
+              actions={
+                <>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    aria-label={t('common.from')}
+                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                  />
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    aria-label={t('common.to')}
+                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                  />
+                  {sortedDays.length > 0 && (
+                    <>
+                      <PrintButton onClick={handlePrint} />
+                      <ExportMenu
+                        label={t('silak.exportRange', { count: sortedDays.length })}
+                        onExportExcel={() => doExport('excel')}
+                        onExportCSV={() => doExport('csv')}
+                        onExportPDF={() => doExport('pdf')}
+                      />
+                    </>
+                  )}
+                </>
+              }
+            />
+          }
+          renderExpanded={(day) => (
+            <p className="text-body text-ink-muted">
+              {formatDigits(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
+              {t('silak.udharLabel')} {formatCurrency(day.udharTotal)} ·{' '}
+              {t('silak.closingLabel')} {formatCurrency(day.closingBalance)}
+            </p>
+          )}
+        />
       )}
     </div>
   )
 }
 
 export default function SilakScreen() {
-  const [tab, setTab] = useState('day') // 'day' | 'month' | 'year'
+  const { canWrite } = useAuth()
+  const { t } = useLocale()
+  const [tab, setTab] = useState('day')
 
   return (
     <div>
-      <p className="font-numeric text-caption text-ink-muted tracking-wide uppercase">
-        {gu.silak.titleGu}
-      </p>
-      <h1 className="font-display text-heading text-ink font-semibold mt-1 mb-4">Jansa Silak</h1>
+      {!canWrite && <ReadOnlyBanner />}
+
+      <h1 className="page-title">{t('silak.title')}</h1>
+      <p className="text-body text-ink-muted mt-1 mb-4">{t('nav.silak')}</p>
 
       <div className="flex gap-1 mb-6 border-b border-border">
         {[
-          ['day', gu.silak.dayTab],
-          ['month', gu.silak.monthTab],
-          ['year', gu.silak.yearTab],
+          ['day', t('silak.dayTab')],
+          ['month', t('silak.monthTab')],
+          ['year', t('silak.yearTab')],
         ].map(([key, label]) => (
           <button
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`px-4 py-2.5 text-body -mb-px border-b-2 ${
+            className={`px-4 py-2.5 text-body -mb-px border-b-2 min-h-12 ${
               tab === key ? 'border-accent text-accent font-semibold' : 'border-transparent text-ink-muted'
             }`}
           >

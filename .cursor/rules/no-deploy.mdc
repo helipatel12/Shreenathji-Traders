@@ -1,0 +1,21 @@
+---
+description: Never deploy to Firebase/hosting/production without explicit owner permission
+alwaysApply: true
+---
+
+# No deploys without permission
+
+**Never deploy** anything for this project unless the owner explicitly asks in that message.
+
+Forbidden without explicit permission:
+- `firebase deploy` (any target: hosting, firestore:rules, storage, functions, etc.)
+- Publishing to Firebase Hosting, App Hosting, or any production/staging URL
+- Pushing release tags or triggering CI deploy pipelines
+- Enabling/configuring cloud services that go live for end users
+
+Allowed without asking:
+- Local work: `npm run build`, `npm run dev`, `npm run lint`, `npm run preview`
+- Editing `firestore.rules`, `storage.rules`, `firebase.json` in the repo only
+- Preparing deploy commands for the owner to run themselves
+
+If deploy seems needed, stop and wait for the owner to say so. Do not ask repeatedly — just do not deploy.

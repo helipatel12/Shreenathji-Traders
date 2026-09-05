@@ -1,20 +1,13 @@
 @import "tailwindcss";
 
 /*
-  Design tokens — Shreenath Traders Management
-  Source of truth: design.md
-
-  Superseded 2026-07-24: the app switched from a bahi-khata (paper
-  ledger) visual identity to a modern SaaS look (white/near-white
-  cards, single dark-green accent, soft shadows) — see design.md §1
-  and memory.md's decisions log. Do not hardcode hex values or font
-  names anywhere else in the app — reference these tokens.
+  White-theme base — clean SaaS admin (prd.md + design.md).
+  White surfaces, soft borders, blue accent for primary actions.
 */
 
 @theme {
-  /* Color — design.md §2 */
   --color-surface: #ffffff;
-  --color-surface-muted: #f8fafc;
+  --color-surface-muted: #f6f7f5;
   --color-ink: #1a1e1b;
   --color-ink-muted: #6b7268;
   --color-accent: #2b4238;
@@ -22,29 +15,36 @@
   --color-accent-soft: #e7ece8;
   --color-success: #3f6b4a;
   --color-danger: #b3413a;
-  --color-border: #D1D6DE;
+  --color-border: #e5e7e2;
+  --color-sidebar: #ffffff;
+  --color-sidebar-hover: #f3f4f1;
+  --color-sidebar-active: #e7ece8;
 
-  /* Type — headings in Inter, body in Noto Sans Gujarati + Inter,
-     numbers tabular (design.md §3) */
   --font-display: "Inter", "Noto Sans Gujarati", sans-serif;
   --font-body: "Noto Sans Gujarati", "Inter", sans-serif;
   --font-numeric: "Inter", sans-serif;
 
-  /* Restrained 4-size type scale (design.md §3) */
-  --text-display: 1.75rem;
-  --text-display--line-height: 2.15rem;
-  --text-heading: 1.25rem;
-  --text-heading--line-height: 1.6rem;
-  --text-body: 0.9375rem;
-  --text-body--line-height: 1.4rem;
-  --text-caption: 0.8125rem;
-  --text-caption--line-height: 1.1rem;
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
+  --text-heading: 1.35rem;
+  --text-heading--line-height: 1.7rem;
+  --text-body: 1rem;
+  --text-body--line-height: 1.5rem;
+  --text-caption: 0.875rem;
+  --text-caption--line-height: 1.2rem;
 }
 
 @layer base {
   html {
     background-color: var(--color-surface-muted);
     color: var(--color-ink);
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   body {
@@ -52,18 +52,35 @@
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
+    scrollbar-width: none;
   }
 
-  /* Tabular figures everywhere money/weights/dates are shown — a
-     money-app legibility requirement independent of visual style
-     (design.md §3). */
+  body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  * {
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
   .font-numeric,
   .num {
     font-family: var(--font-numeric);
     font-variant-numeric: tabular-nums;
   }
 
-  /* Visible keyboard focus states for desktop use (design.md §8) */
   :focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
@@ -71,22 +88,216 @@
 }
 
 @layer components {
-  /* Cards, not paper: white rounded surfaces with a soft shadow,
-     sitting on the muted page background (design.md §4). */
   .card {
     background-color: var(--color-surface);
     border-radius: 1rem;
-    box-shadow: 0 1px 2px rgba(26, 30, 27, 0.04), 0 8px 24px rgba(26, 30, 27, 0.06);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
   }
 
-  .badge-success {
-    background-color: var(--color-accent-soft);
-    color: var(--color-success);
+  .page-title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    line-height: 1.9rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1.1rem;
+    border-radius: 0.75rem;
+    background: var(--color-accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn-primary:hover {
+    background: var(--color-accent-hover);
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-border);
+    background: #fff;
+    color: var(--color-ink-muted);
+    font-weight: 600;
+  }
+
+  .data-table-wrap {
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+
+  .data-table-toolbar {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    background: #fff;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+
+  .data-table thead th {
+    background: #f3f4f6;
+    color: var(--color-ink-muted);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  .data-table thead th.th-filter {
+    padding-bottom: 0.55rem;
+  }
+
+  .data-table .th-label {
+    margin-bottom: 0.2rem;
+  }
+
+  .data-table .th-filter-select {
+    display: block;
+    width: 100%;
+    min-width: 6.5rem;
+    max-width: 11rem;
+    margin-top: 0.25rem;
+    min-height: 1.85rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--color-border);
+    background: #fff;
+    color: var(--color-ink);
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    outline: none;
+  }
+  .data-table .th-filter-select:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-soft);
+  }
+
+  .data-table .th-filter-spacer {
+    height: 1.85rem;
+    margin-top: 0.25rem;
+  }
+
+  .data-table tbody td {
+    padding: 0.85rem 0.85rem;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-ink);
+    vertical-align: middle;
+  }
+
+  .data-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .data-table tbody tr.data-row {
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+  }
+
+  .data-table tbody tr.data-row:hover {
+    background: #f8fafc;
+  }
+
+  .data-table tbody tr.data-row.is-selected {
+    background: var(--color-accent-soft);
+  }
+
+  .data-table tbody tr.data-row.is-voided {
+    opacity: 0.55;
+  }
+
+  .data-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .data-table .actions-cell {
+    white-space: nowrap;
+  }
+
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 0.5rem;
+    border: none;
+    cursor: pointer;
+    transition: filter 0.12s ease;
+  }
+  .action-btn:hover {
+    filter: brightness(0.95);
+  }
+  .action-btn-edit {
+    background: #16a34a;
+    color: #fff;
+  }
+  .action-btn-danger {
+    background: #dc2626;
+    color: #fff;
+  }
+  .action-btn-muted {
+    background: #e5e7eb;
+    color: #374151;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .badge-blue {
+    background: #e7ece8;
+    color: #2b4238;
+  }
+  .badge-green {
+    background: #dcfce7;
+    color: #15803d;
+  }
+  .badge-red {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+  .badge-gray {
+    background: #f3f4f6;
+    color: #4b5563;
+  }
+  .badge-amber {
+    background: #ffedd5;
+    color: #c2410c;
   }
 }
 
-/* Respect prefers-reduced-motion: disable the cleared-badge animation
-   and any other non-essential motion app-wide (design.md §6). */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -4,19 +4,25 @@
 // views, matching prd.md §4.2's two export requirements: a single
 // vepari's full ledger, or an all-veparis summary for a date range.
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useVeparis } from '../../hooks/useVeparis'
 import { useBills } from '../../hooks/useBills'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useVepariDakhla, useAllVepariDakhlaSummary } from '../../hooks/useVepariDakhla'
-import { formatCurrency } from '../../utils/calc'
+import { useLocale } from '../../context/LocaleContext'
 import { todayKeyIST } from '../../utils/dates'
-import gu from '../../locales/gu.json'
+import { vepariStableId } from '../../utils/vepari'
+import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import BillForm, { billToFormValues } from '../bills/BillForm'
+import { printBill } from '../bills/billPrint'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
+import ReadOnlyBanner from '../../components/ReadOnlyBanner'
+import DataTable from '../../components/DataTable'
+import TableToolbar from '../../components/TableToolbar'
+import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printDakhla } from './dakhlaPrint'
 import {
@@ -27,15 +33,48 @@ import {
 } from './dakhlaExport'
 
 function SingleVepariLedger() {
-  const { user } = useAuth()
+  const { user, canWrite } = useAuth()
+  const { t, formatCurrency, formatDigits } = useLocale()
   const { veparis } = useVeparis()
   const { updateBill } = useBills()
   const { business } = useBusiness()
   const [vepariId, setVepariId] = useState('')
   const [editingLocalId, setEditingLocalId] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState('entryNumber')
+  const [sortDir, setSortDir] = useState('asc')
   const { vepari, lines, totals, loading } = useVepariDakhla(vepariId)
 
   const editingLine = lines.find((l) => l.bill.id === editingLocalId)
+
+  const visibleLines = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const filtered = lines.filter((line) => {
+      if (!q) return true
+      return (
+        String(line.bill.farmerName || '').toLowerCase().includes(q) ||
+        String(line.bill.entryNumber || '').toLowerCase().includes(q) ||
+        String(line.bill.farmerVillage || '').toLowerCase().includes(q)
+      )
+    })
+    return sortByNoteOrDate(filtered, {
+      sortKey,
+      sortDir,
+      getNote: (line) => line.bill.entryNumber,
+      getDate: (line) => line.bill.date,
+    })
+  }, [lines, search, sortKey, sortDir])
+
+  function setNoteSort(value) {
+    setSortKey('entryNumber')
+    setSortDir(value || 'asc')
+  }
+
+  function setDateSort(value) {
+    setSortKey('date')
+    setSortDir(value || 'asc')
+  }
 
   async function handleUpdate(payload) {
     await updateBill(editingLocalId, payload, user?.email)
@@ -52,129 +91,218 @@ function SingleVepariLedger() {
   }
 
   function handlePrint() {
-    printDakhla(vepari, lines, totals.total, { business })
+    printDakhla(vepari, lines, totals.total, { business, totals })
   }
+
+  function exportOne(line, format) {
+    const rows = buildVepariLedgerRows([line])
+    const filename = `dakhla_${line.bill.entryNumber}`
+    const title = `Dakhla — ${line.bill.entryNumber}`
+    if (format === 'excel') exportRowsToExcel(rows, filename, 'Dakhla')
+    if (format === 'csv') exportRowsToCSV(rows, filename)
+    if (format === 'pdf') exportRowsToPDF(rows, buildVepariLedgerPdfColumns(), filename, title)
+  }
+
+  function printOne(line) {
+    printBill(line.bill, {
+      business,
+      vepariName: vepari?.name ?? '—',
+      vepariVillage: vepari?.village,
+    })
+  }
+
+  const columns = [
+    {
+      key: 'date',
+      header: t('bills.dateLabel'),
+      filter: dateSortFilter(t, sortKey, sortDir, setDateSort),
+      render: (line) => (
+        <span className="font-numeric whitespace-nowrap">{formatDigits(line.bill.date)}</span>
+      ),
+    },
+    {
+      key: 'entry',
+      header: t('bills.entryNumberLabel'),
+      filter: noteSortFilter(t, sortKey, sortDir, setNoteSort),
+      render: (line) => <span className="font-numeric">{formatDigits(line.bill.entryNumber)}</span>,
+    },
+    {
+      key: 'farmer',
+      header: t('bills.farmerNameLabel'),
+      render: (line) => (
+        <div>
+          <p className="font-semibold">{line.bill.farmerName}</p>
+          <p className="text-caption text-ink-muted">{line.bill.farmerVillage}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'weight',
+      header: t('dakhla.weightLabel'),
+      align: 'right',
+      render: (line) => formatDigits(line.weightKg),
+    },
+    {
+      key: 'goods',
+      header: t('dakhla.goodsAmountLabel'),
+      align: 'right',
+      render: (line) => formatCurrency(line.goodsAmount),
+    },
+    {
+      key: 'tolai',
+      header: t('dakhla.tolaiLabel'),
+      align: 'right',
+      render: (line) => formatCurrency(line.tolai),
+    },
+    {
+      key: 'shes',
+      header: t('dakhla.shesLabel'),
+      align: 'right',
+      render: (line) => formatCurrency(line.shes),
+    },
+    {
+      key: 'commission',
+      header: t('dakhla.commissionLabel'),
+      align: 'right',
+      render: (line) => formatCurrency(line.commission),
+    },
+    {
+      key: 'total',
+      header: t('dakhla.totalLabel'),
+      align: 'right',
+      render: (line) => <span className="font-semibold">{formatCurrency(line.total)}</span>,
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      render: (line) => (
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <PrintButton compact onClick={() => printOne(line)} />
+          <ExportMenu
+            compact
+            onExportExcel={() => exportOne(line, 'excel')}
+            onExportCSV={() => exportOne(line, 'csv')}
+            onExportPDF={() => exportOne(line, 'pdf')}
+          />
+          {canWrite && (
+            <button
+              type="button"
+              className="action-btn action-btn-edit"
+              aria-label={t('common.edit')}
+              onClick={() => setEditingLocalId(line.bill.id)}
+            >
+              <Pencil size={14} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ]
 
   return (
     <div>
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
           <label className="block text-caption text-ink-muted mb-1.5">
-            {gu.dakhla.selectVepariLabel}
+            {t('dakhla.selectVepariLabel')}
           </label>
           <select
             value={vepariId}
-            onChange={(e) => setVepariId(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2.5 px-3 min-h-11 min-w-48"
+            onChange={(e) => {
+              setVepariId(e.target.value)
+              setSelectedId(null)
+            }}
+            className="text-body text-ink bg-surface border border-border rounded-xl py-2.5 px-3 min-h-12 min-w-48"
           >
             <option value="">—</option>
             {veparis.map((v) => (
-              <option key={v.id} value={v.id}>
+              <option key={vepariStableId(v) || v.id} value={vepariStableId(v)}>
                 {v.name}
               </option>
             ))}
           </select>
         </div>
-        {vepariId && lines.length > 0 && (
-          <>
-            <PrintButton onClick={handlePrint} />
-            <ExportMenu
-              label="Export ledger"
-              onExportExcel={() => doExport('excel')}
-              onExportCSV={() => doExport('csv')}
-              onExportPDF={() => doExport('pdf')}
-            />
-          </>
-        )}
       </div>
 
-      {editingLine && (
+      {editingLine && canWrite && (
         <div className="card px-5 py-5 mb-6">
           <BillForm
             initialValues={billToFormValues(editingLine.bill)}
             onSubmit={handleUpdate}
             onCancel={() => setEditingLocalId(null)}
-            submitLabel={gu.bills.saveChanges}
+            submitLabel={t('bills.saveChanges')}
           />
         </div>
       )}
 
       {!vepariId ? (
-        <p className="text-body text-ink-muted">Select a vepari to see their ledger.</p>
+        <p className="text-body text-ink-muted">{t('dakhla.pickVepari')}</p>
       ) : loading ? (
-        <p className="text-caption text-ink-muted">Loading…</p>
-      ) : lines.length === 0 ? (
-        <div className="card px-5 py-5 max-w-md">
-          <p className="text-body text-ink-muted">
-            No bills for {vepari?.name} yet — they'll appear here as soon as one's saved.
-          </p>
-        </div>
+        <SkeletonTable rows={5} cols={6} />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-body">
-            <thead>
-              <tr className="border-b border-border text-caption text-ink-muted text-left">
-                <th className="px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium">{gu.bills.entryNumberLabel}</th>
-                <th className="px-4 py-3 font-medium">Farmer</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.weightLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.goodsAmountLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.tolaiLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.shesLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.commissionLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.totalLabel}</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="font-numeric">
-              {lines.map((line) => (
-                <tr key={line.bill.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 whitespace-nowrap">{line.bill.date}</td>
-                  <td className="px-4 py-3">{line.bill.entryNumber}</td>
-                  <td className="px-4 py-3 font-sans">{line.bill.farmerName}</td>
-                  <td className="px-4 py-3 text-right">{line.weightKg}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(line.goodsAmount)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(line.tolai)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(line.shes)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(line.commission)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatCurrency(line.total)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setEditingLocalId(line.bill.id)}
-                      aria-label={`Edit bill ${line.bill.entryNumber}`}
-                      className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-accent"
-                    >
-                      <Pencil size={16} strokeWidth={1.75} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
+        <DataTable
+          columns={columns}
+          rows={visibleLines}
+          rowKey={(line) => line.bill.id}
+          selectedKey={selectedId}
+          onRowClick={(line) =>
+            setSelectedId((id) => (id === line.bill.id ? null : line.bill.id))
+          }
+          empty={<p className="text-body text-ink-muted">{t('dakhla.noBills')}</p>}
+          meta={t('common.showingCount', { count: formatDigits(visibleLines.length) })}
+          toolbar={
+            <TableToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder={t('bills.searchPlaceholder')}
+              actions={
+                lines.length > 0 ? (
+                  <>
+                    <PrintButton onClick={handlePrint} />
+                    <ExportMenu
+                      label={t('dakhla.exportLedger')}
+                      onExportExcel={() => doExport('excel')}
+                      onExportCSV={() => doExport('csv')}
+                      onExportPDF={() => doExport('pdf')}
+                    />
+                  </>
+                ) : null
+              }
+            />
+          }
+          renderExpanded={(line) => (
+            <p className="text-caption text-ink-muted">
+              {line.bill.farmerName} · {formatDigits(line.bill.date)}
+            </p>
+          )}
+          footer={
+            visibleLines.length > 0 ? (
               <tr className="bg-accent-soft font-numeric font-semibold">
+                <td />
                 <td className="px-4 py-3" colSpan={3}>
-                  Total
+                  {t('dakhla.totalLabel')}
                 </td>
-                <td className="px-4 py-3 text-right">{totals.weightKg}</td>
+                <td className="px-4 py-3 text-right">{formatDigits(totals.weightKg)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.goodsAmount)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.tolai)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.shes)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.commission)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.total)}</td>
-                <td className="px-4 py-3" />
+                <td />
               </tr>
-            </tfoot>
-          </table>
-        </div>
+            ) : null
+          }
+        />
       )}
     </div>
   )
 }
 
 function AllVepariSummary() {
+  const { t, formatCurrency, formatDigits } = useLocale()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
   const { rows, loading } = useAllVepariDakhlaSummary(fromDate, toDate)
 
   function doExport(format) {
@@ -191,103 +319,151 @@ function AllVepariSummary() {
     printRows(buildAllVepariSummaryRows(rows), buildAllVepariSummaryPdfColumns(), 'Vepari Dakhla — All veparis')
   }
 
+  function exportOne(row, format) {
+    const exportRows = buildAllVepariSummaryRows([row])
+    const filename = `dakhla_${row.vepari.name?.replace(/\s+/g, '_') || 'vepari'}`
+    const title = `Vepari Dakhla — ${row.vepari.name}`
+    if (format === 'excel') exportRowsToExcel(exportRows, filename, 'Dakhla Summary')
+    if (format === 'csv') exportRowsToCSV(exportRows, filename)
+    if (format === 'pdf') exportRowsToPDF(exportRows, buildAllVepariSummaryPdfColumns(), filename, title)
+  }
+
+  function printOne(row) {
+    printRows(buildAllVepariSummaryRows([row]), buildAllVepariSummaryPdfColumns(), `Vepari Dakhla — ${row.vepari.name}`)
+  }
+
+  const columns = [
+    {
+      key: 'name',
+      header: t('bills.vepariLabel'),
+      render: (row) => <span className="font-semibold">{row.vepari.name}</span>,
+    },
+    {
+      key: 'village',
+      header: t('bills.farmerVillageLabel'),
+      render: (row) => <span className="text-ink-muted">{row.vepari.village}</span>,
+    },
+    {
+      key: 'count',
+      header: t('dakhla.billCountLabel'),
+      align: 'right',
+      render: (row) => formatDigits(row.billCount),
+    },
+    {
+      key: 'total',
+      header: t('dakhla.totalLabel'),
+      align: 'right',
+      render: (row) => (
+        <span className="font-semibold">{formatCurrency(row.totals.total)}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      render: (row) => (
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <PrintButton compact onClick={() => printOne(row)} />
+          <ExportMenu
+            compact
+            onExportExcel={() => exportOne(row, 'excel')}
+            onExportCSV={() => exportOne(row, 'csv')}
+            onExportPDF={() => exportOne(row, 'pdf')}
+          />
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div>
-      <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div>
-          <label className="block text-caption text-ink-muted mb-1.5">From</label>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-          />
-        </div>
-        <div>
-          <label className="block text-caption text-ink-muted mb-1.5">To</label>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-          />
-        </div>
-        {rows.length > 0 && (
-          <>
-            <PrintButton onClick={handlePrint} />
-            <ExportMenu
-              label={`Export summary (${rows.length})`}
-              onExportExcel={() => doExport('excel')}
-              onExportCSV={() => doExport('csv')}
-              onExportPDF={() => doExport('pdf')}
-            />
-          </>
-        )}
-      </div>
-
       {loading ? (
-        <p className="text-caption text-ink-muted">Loading…</p>
-      ) : rows.length === 0 ? (
-        <div className="card px-5 py-5 max-w-md">
-          <p className="text-body text-ink-muted">No bills in that range yet.</p>
-        </div>
+        <SkeletonTable rows={5} cols={4} />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-body">
-            <thead>
-              <tr className="border-b border-border text-caption text-ink-muted text-left">
-                <th className="px-4 py-3 font-medium">Vepari</th>
-                <th className="px-4 py-3 font-medium">Village</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.billCountLabel}</th>
-                <th className="px-4 py-3 font-medium text-right">{gu.dakhla.totalLabel}</th>
-              </tr>
-            </thead>
-            <tbody className="font-numeric">
-              {rows.map(({ vepari, billCount, totals }) => (
-                <tr key={vepari.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-sans">{vepari.name}</td>
-                  <td className="px-4 py-3 font-sans text-ink-muted">{vepari.village}</td>
-                  <td className="px-4 py-3 text-right">{billCount}</td>
-                  <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totals.total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => vepariStableId(row.vepari) || row.vepari.id}
+          selectedKey={selectedId}
+          onRowClick={(row) => {
+            const id = vepariStableId(row.vepari) || row.vepari.id
+            setSelectedId((cur) => (String(cur) === String(id) ? null : id))
+          }}
+          empty={<p className="text-body text-ink-muted">{t('dakhla.noSummary')}</p>}
+          meta={t('common.showingCount', { count: formatDigits(rows.length) })}
+          toolbar={
+            <TableToolbar
+              actions={
+                <>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    aria-label={t('common.from')}
+                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                  />
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    aria-label={t('common.to')}
+                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                  />
+                  {rows.length > 0 && (
+                    <>
+                      <PrintButton onClick={handlePrint} />
+                      <ExportMenu
+                        label={t('dakhla.exportSummary')}
+                        onExportExcel={() => doExport('excel')}
+                        onExportCSV={() => doExport('csv')}
+                        onExportPDF={() => doExport('pdf')}
+                      />
+                    </>
+                  )}
+                </>
+              }
+            />
+          }
+          renderExpanded={(row) => (
+            <p className="text-body text-ink-muted">
+              {row.vepari.name} · {formatDigits(row.billCount)}{' '}
+              {t('dakhla.billCountLabel').toLowerCase()} · {formatCurrency(row.totals.total)}
+            </p>
+          )}
+        />
       )}
     </div>
   )
 }
 
 export default function DakhlaScreen() {
-  const [tab, setTab] = useState('single') // 'single' | 'all'
+  const { canWrite } = useAuth()
+  const { t } = useLocale()
+  const [tab, setTab] = useState('single')
 
   return (
     <div>
-      <p className="font-numeric text-caption text-ink-muted tracking-wide uppercase">
-        {gu.dakhla.titleGu}
-      </p>
-      <h1 className="font-display text-heading text-ink font-semibold mt-1 mb-4">Vepari Dakhla</h1>
+      {!canWrite && <ReadOnlyBanner />}
 
-      <div className="flex gap-1 mb-6 border-b border-border">
-        <button
-          type="button"
-          onClick={() => setTab('single')}
-          className={`px-4 py-2.5 text-body -mb-px border-b-2 ${
-            tab === 'single' ? 'border-accent text-accent font-semibold' : 'border-transparent text-ink-muted'
-          }`}
-        >
-          {gu.dakhla.singleVepariTab}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('all')}
-          className={`px-4 py-2.5 text-body -mb-px border-b-2 ${
-            tab === 'all' ? 'border-accent text-accent font-semibold' : 'border-transparent text-ink-muted'
-          }`}
-        >
-          {gu.dakhla.allVeparisTab}
-        </button>
+      <h1 className="page-title mb-6">{t('dakhla.title')}</h1>
+
+      <div className="flex gap-1 mb-5 border-b border-border">
+        {[
+          ['single', t('dakhla.singleVepariTab')],
+          ['all', t('dakhla.allVeparisTab')],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`px-4 py-2.5 text-body -mb-px border-b-2 min-h-12 ${
+              tab === key
+                ? 'border-accent text-accent font-semibold'
+                : 'border-transparent text-ink-muted'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {tab === 'single' ? <SingleVepariLedger /> : <AllVepariSummary />}

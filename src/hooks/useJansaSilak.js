@@ -51,7 +51,7 @@ function useAllSilakEntries() {
     const autoJama = bills.map((bill) => ({
       date: bill.date,
       side: 'jama',
-      label: `${gu.bills.entryNumberLabel} ${bill.entryNumber} — ${bill.farmerName}`,
+      label: `${gu.bills.entryNumberLabel} ${bill.entryNumber} — ${bill.farmerName}`, // ledger labels stay Gujarati
       amount: bill.totalAmount,
       isManual: false,
       key: `bill-${bill.firestoreId}`,
@@ -129,10 +129,19 @@ export function useJansaSilakRange(fromDate, toDate) {
     if (!fromDate || !toDate) return []
     const startDate = earliestDate && earliestDate < fromDate ? earliestDate : fromDate
     const dateKeys = eachDateKeyInRange(startDate, toDate)
+
+    const byDate = new Map()
+    for (const entry of allEntries) {
+      if (!entry?.date) continue
+      const list = byDate.get(entry.date)
+      if (list) list.push(entry)
+      else byDate.set(entry.date, [entry])
+    }
+
     let runningBalance = 0
     const results = []
     for (const dateKey of dateKeys) {
-      const dayEntries = allEntries.filter((e) => e.date === dateKey)
+      const dayEntries = byDate.get(dateKey) || []
       const { jamaTotal, udharTotal, closingBalance } = computeSilakDay(dayEntries, runningBalance)
       if (dateKey >= fromDate) {
         results.push({

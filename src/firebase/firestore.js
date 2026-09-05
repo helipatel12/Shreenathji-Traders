@@ -3,7 +3,7 @@
 // its collection(s) — see phases.md. Phase 1 adds the business/user
 // helpers needed for login; later phases add bills/payments/etc.
 
-import { collection, doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDoc, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
 import { db } from './config'
 
 // This app is single-business per deployment — prd.md and
@@ -126,14 +126,35 @@ export async function getUserRecord(uid) {
 // auth) — switched to email since Firebase now requires the Blaze
 // (paid) plan for phone/SMS auth, which conflicts with prd.md §5's
 // free-tier requirement. See memory.md decisions log.
-export async function getOrCreateUserOnFirstLogin({ uid, email }) {
+export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone = '' }) {
+  const displayName = String(name || '').trim()
+  const normalizedEmail = String(email || '').trim().toLowerCase()
   const existingUser = await getUserRecord(uid)
   if (existingUser) {
+    if (displayName && displayName !== existingUser.name) {
+      await setDoc(userRef(uid), { name: displayName }, { merge: true })
+      return { user: { ...existingUser, name: displayName }, status: 'existing' }
+    }
     return { user: existingUser, status: 'existing' }
   }
 
-  const business = await getBusiness()
-  if (!business) {
+  // Business get is member/invite/bootstrap-only (firestore.rules). A
+  // signed-in stranger gets permission-denied when the business already
+  // exists — treat that the same as "business exists, you are not a
+  // member yet" and fall through to the invite check.
+  let business = null
+  let businessDefinitelyExists = false
+  try {
+    business = await getBusiness()
+  } catch (err) {
+    if (err?.code === 'permission-denied') {
+      businessDefinitelyExists = true
+    } else {
+      throw err
+    }
+  }
+
+  if (!business && !businessDefinitelyExists) {
     const batch = writeBatch(db)
     batch.set(businessRef(), {
       name: 'Shreenath Traders',
@@ -141,10 +162,10 @@ export async function getOrCreateUserOnFirstLogin({ uid, email }) {
       createdAt: serverTimestamp(),
     })
     const newUser = {
-      email,
-      phone: '',
+      email: normalizedEmail,
+      phone: phone || '',
       role: 'owner',
-      name: '',
+      name: displayName,
       location: '',
       createdAt: serverTimestamp(),
     }
@@ -153,22 +174,27 @@ export async function getOrCreateUserOnFirstLogin({ uid, email }) {
     return { user: { id: uid, ...newUser }, status: 'created-owner' }
   }
 
-  const inviteSnap = await getDoc(inviteDocRef(email))
-  if (inviteSnap.exists() && inviteSnap.data().status === 'pending') {
-    const invite = inviteSnap.data()
-    const batch = writeBatch(db)
-    const newUser = {
-      email,
-      phone: '',
-      role: invite.role,
-      name: invite.name || '',
-      location: invite.location || '',
-      createdAt: serverTimestamp(),
+  if (normalizedEmail) {
+    const inviteSnap = await getDoc(inviteDocRef(normalizedEmail))
+    if (inviteSnap.exists() && inviteSnap.data().status === 'pending') {
+      const invite = inviteSnap.data()
+      const batch = writeBatch(db)
+      const newUser = {
+        email: normalizedEmail,
+        phone: phone || '',
+        role: invite.role,
+        name: displayName || invite.name || '',
+        location: invite.location || '',
+        createdAt: serverTimestamp(),
+      }
+      batch.set(userRef(uid), newUser)
+      batch.update(inviteDocRef(normalizedEmail), {
+        status: 'accepted',
+        acceptedAt: serverTimestamp(),
+      })
+      await batch.commit()
+      return { user: { id: uid, ...newUser }, status: 'created-staff' }
     }
-    batch.set(userRef(uid), newUser)
-    batch.update(inviteDocRef(email), { status: 'accepted', acceptedAt: serverTimestamp() })
-    await batch.commit()
-    return { user: { id: uid, ...newUser }, status: 'created-staff' }
   }
 
   return { user: null, status: 'unauthorized' }

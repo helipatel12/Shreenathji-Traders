@@ -4,6 +4,7 @@
 // (with a totals row); a bill list exports one row per bill.
 
 import { formatCurrency } from '../../utils/calc'
+import { vepariDisplayName } from '../../utils/vepari'
 import gu from '../../locales/gu.json'
 
 const entryNumberLabel = gu.bills.entryNumberLabel
@@ -49,7 +50,7 @@ export function buildBillListRows(bills, veparis) {
     Farmer: bill.farmerName,
     Village: bill.farmerVillage,
     Date: bill.date,
-    Vepari: veparis.find((v) => String(v.id) === String(bill.vepariId))?.name ?? '—',
+    Vepari: vepariDisplayName(veparis, bill.vepariId),
     'Line items': bill.items.length,
     Total: formatCurrency(bill.totalAmount),
   }))

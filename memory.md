@@ -12,9 +12,12 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 
 ## Current state
 
-**Phase**: 9 (Year-end archive) — code complete, plus owner-requested bill-voiding, a standalone Print button beside every export menu, and paper-form-matching print templates for Bills and Dakhla. Not yet verified by owner. Phase 7's જમા/ઉધાર interpretation is still unvalidated too — see Known issues, all of these matter.
-**Currently working on**: — (ready for owner to test, then Phase 10 — CA / reporting export)
-**Blocked on**: nothing code-side. `firestore.rules` changed again (owner-only voiding) — needs redeploy before testing. New business profile fields (Settings → Business Profile) should be filled in before printing looks complete — see Known issues.
+**Owner rule (2026-09-04): NEVER deploy without explicit permission.** No `firebase deploy`, hosting, rules, or production publish unless the owner asks in that message. Local build/dev/lint/preview is fine.
+
+**Phase**: Phase 10 (CA reports) complete; Phases 0–10 code-complete. Phase 11 remains owner trial / offline hardening (needs real devices). Build clean locally. **Not deployed** (owner forbids agent deploys).
+
+**Currently working on**: — ready for owner local test (`npm run dev`)
+**Blocked on**: owner must validate Jansa Silak જમા/ઉધાર against paper ledger; Phase 11 offline multi-device trial.
 
 ## Completed
 
@@ -85,6 +88,11 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 - 2026-08-08 — **Extended the business profile (Settings, Phase 8) with the identity fields the print templates need**: owner name, address/area, mobile, license number — all optional, `BusinessProfileSection.jsx` updated with a note explaining they appear on the printed documents. **Caught and fixed a real problem before shipping this**: the print template as originally drafted had this data hardcoded as fallback values — using the actual real owner's actual real name, phone number, and license number baked directly into the source code, rather than reading from Settings. Fixed to use generic blank/omitted fallbacks instead (a blank field on the printed document means "not filled in yet," not "here's someone's real personal information as a permanent code default") — that data now only ever comes from what the owner actually enters in Settings.
 - 2026-08-08 — **Actually verified the print output visually, not just that it compiles** — this is a detailed visual-design feature being checked against real reference photos, so build-success alone wasn't enough confidence. Temporarily exported the templates' internal HTML-building functions, ran them against realistic fake data (multi-line bill, multi-farmer dakhla), rendered the output through a real browser, and screenshotted both — confirmed Gujarati text, layout, borders, and totals all render correctly before reverting the temporary exports. Both renders visually match their reference photos closely (see this conversation's screenshots).
 - 2026-08-08 — `npm run build` verified clean (new chunks: `jspdf.plugin.autotable`, `jszip.min` now show as separate named chunks rather than bundled anonymously — cosmetic, not a behavior change). Playwright regression check on the login screen: no runtime errors, matching pixel colors.
+- 2026-09-04 — Professional polish: custom-rates NaN fix (`normalizeRates` / canonical keys), auth error screen, Gujarati/English i18n cleanup, dashboard offline merge, settings save UX, ExportMenu/Print polish, CA/owner gates.
+- 2026-09-05 — White SaaS theme (`tokens.css` forest accent), MixHub-style `DataTable` (header filters + action buttons) on Bills/Rojmer/Silak/Dakhla/admin, collapsible sidebar, login name → greeting, dashboard charts (no quick links), Gujarati digit input+display, voided rows hidden from working lists, owner-only void/delete, admin User Management + Queue Monitor, dakhla print matched to paper `દાખલો` (portrait red grid), bill+dakhla prints full-page `@page { margin: 0 }`.
+- 2026-09-05 — **Cleared stale Known issues after code audit**: (1) staff/CA provisioning exists (Phase 8 + admin screens); (2) bundle no longer blocks at 2MB — main ~1.27MB with export libs code-split; (3) PDF Gujarati font / payment void / rojmer payment-row export are shipped; (4) voided bills intentionally hidden from Bills list (not struck-through); (5) print templates are portrait full-page matching paper refs; (6) `useDashboardSummary` now reuses `useBills`/`usePayments`/`useSilakEntries` (removed duplicate onSnapshot path); (7) `npm audit fix` cleared all advisories except the known accepted `xlsx` write-only risk.
+- 2026-09-05 — Right-rail **ProfileCorner** (desktop xl+): avatar, today snapshot cards, reminders; language/settings/logout moved there on wide screens.
+- 2026-09-05 — **Phase 10 (CA / reporting) built** — was the only incomplete phase in `phases.md`. `useCaReport.js` + `ReportsScreen.jsx` + `caReportExport.js`: FY/date-range summary (bills, goods total, commission earned, outstanding rojmer), tabs for bill list / vepari totals / outstanding, tab export + multi-sheet Full Excel. Nav `/reports` + Settings link (CA-friendly). Fixed `phases.md` title typo (`ch#` → `#`). Documented that sync lives in feature hooks (`syncEngine.js` is the architecture placeholder, not a second path). **Phase 11** still needs owner offline/multi-device trial — not something to fake in code.
 
 ## Decisions log
 
@@ -100,57 +108,15 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 
 ## Known issues / open questions
 
-- **Bundle size warning**: `npm run build` now flags the main JS chunk at ~2.1MB, plus separate `html2canvas`/`dompurify` chunks (~226KB combined) pulled in by jsPDF whether or not its HTML-to-PDF feature is used (it isn't — only `autoTable`), plus ~260KB from the embedded Gujarati font added today (necessary for correct PDF output — see decisions log — not something to trim). Not a blocker, but worth code-splitting (e.g. dynamic `import()` on the export module and/or route components) during Phase 11's polish pass if it matters for real-world load times on slower mobile connections.
-- **No staff/CA provisioning path exists yet** (expected — that's Phase 8). Right now the app only has one way in: the original bootstrap owner account. Worth keeping in mind if the owner wants a second person testing before Phase 8 is built — they'd need to be handed the owner's own login for now, not a separate account.
-- **Phase 4's full bill entry flow needs a real check from the owner** — same limitation as every phase so far: I don't have, and shouldn't ask for, the real login. This phase specifically needs the **offline test phases.md's own "done when" calls for** — worth doing properly, not skipping:
-  1. Turn on airplane mode (or otherwise disconnect), open the app, add a new bill with 2+ goods lines — it should save instantly and show up in the list with a "· syncing…" tag, no error, no waiting on network.
-  2. Still offline, edit that bill (change a farmer name or a line's weight) — should update instantly, edit history should show the change once you look.
-  3. Reconnect — the "· syncing…" tag should disappear within a few seconds as it reaches Firestore.
-  4. Reload the page entirely — the bill (and its edit) should still be there, confirming it actually reached Firestore and isn't just a local artifact.
-  5. Try each of the 3 export formats (Excel/CSV/PDF) on both a single bill and the filtered list — open each downloaded file and confirm the Gujarati goods-type text displays correctly (not garbled) and the numbers/total match what's shown on screen.
-  6. Confirm the vepari dropdown shows the veparis added in Phase 3, and that selecting one displays that vepari's village underneath.
-- **`npm audit` shows 11 high-severity advisories, up from the 1 (xlsx) previously known** — a fresh `npm install` pulled newer versions of `vite-plugin-pwa`'s and `react-router-dom`'s transitive dependencies that have new advisories. Checked both: the `react-router` one is a CSRF issue specific to RSC (React Server Components) mode, which this plain Vite SPA doesn't use; the `brace-expansion` one is inside `workbox-build`, a build-time-only tool never shipped to the browser. Neither appears to be a real exploitable risk for this app as built, but flagging rather than silently ignoring — `npm audit fix --force` would pull in breaking major-version bumps if this ever needs a closer look.
-- **Phase 5's dakhla numbers need a real check against manual math** — same limitation as every phase: no owner login on my end. Worth doing properly since this is money math:
-  1. Pick a vepari with a couple of bills already entered, open their ledger in Dakhla → By vepari.
-  2. For one line, manually compute: tolai = ₹0.006 × total weight (kg); shes = 0.7% × goods amount; commission = 0.45% × goods amount; total = goods amount + tolai + shes + commission. Compare to what's shown — should match exactly (goods amount is the bill's total from Phase 4).
-  3. If that vepari has custom rates set (Phase 3), confirm the dakhla line uses THEIR rate, not the 0.006/0.7%/0.45% default.
-  4. Edit one of the bills (e.g. change a line's weight) from inside the Dakhla screen itself (not the Bills screen) — confirm the dakhla totals update immediately without needing a page reload.
-  5. Switch to the "All veparis" tab, set a date range that includes a few bills, confirm the per-vepari totals match what you'd get by summing that vepari's individual lines in the "By vepari" tab for the same range.
-  6. Try exporting both views (single ledger and all-veparis summary) in all 3 formats and spot-check the numbers in the downloaded file against the screen.
-- **Phase 6's two-offline-devices test — this is the one that matters most.** phases.md names this specific test as "the key architecture test" for the whole offline-first bet (architecture.md §5). Needs two devices/browsers (or two browser profiles) both logged in as the owner:
-  1. Pick one bill with a balance due. On Device A, go offline (airplane mode), record a partial payment against it.
-  2. On Device B, also offline, record a *different* partial payment against that same bill — ideally enough that together the two payments clear it.
-  3. Bring both devices back online.
-  4. On both devices, confirm: both payments show up (neither overwrote the other), the balance/cleared status reflects BOTH payments combined, and if together they reached the total, it shows cleared with the correct clearing date (whichever payment's date pushed the cumulative total past the bill amount).
-  5. Reload both devices fully — confirms this is really state in Firestore, not just each device's own local cache agreeing with itself.
-  If this doesn't work cleanly, it's a real architecture problem worth catching now — per phases.md's own note, better to find out before Phases 7–10 build more on top of the same assumption.
-- **Re-verify the three fixes from today's feedback**, especially the PDF one since that's the one reported broken:
-  1. Export a bill (Bills), a dakhla ledger (Dakhla), and a rojmer list (Rojmer) as PDF and actually open each file — confirm Gujarati text (entry number labels, goods types, vepari names) displays as real characters, not blank boxes or missing glyphs. Check the table header row specifically, not just the body.
-  2. Export a Rojmer list as Excel or CSV and open it — confirm you see one row per individual payment (not just one row per bill), each with its own date, amount, and cash/cheque, and that a bill with no payments yet still shows up with a blank payment but a visible balance.
-  3. On a bill with at least one payment, void it — confirm it shows struck through with a "Voided" badge (not removed from the list), and that the bill's balance goes back up as if that payment never happened. Then check the export again — a voided payment should not appear as if it were still counted toward the balance.
-- **Phase 7's જમા/ઉધાર definition needs real validation — this is the most important open item in the whole project right now.** Unlike every other "please click around and check" item above, this one is a genuine "the business logic itself might be wrong" flag, not just a UI check:
-  1. Pick a real day from your own paper ledger (or the sample data if `EX1.xlsx` is available) where you know the correct opening balance, જમા total, ઉધાર total, and closing balance by hand.
-  2. Enter/check that same day in the app's Jansa Silak → Day view. Compare all four numbers.
-  3. If they don't match, the likely cause is the interpretation gap documented in `prd.md` §4.4 and `useJansaSilak.js`'s header comment: this app currently treats જમા as bill amounts and ઉધાર as rojmer payments, because there's no feature yet for tracking cash actually collected FROM veparis (only what they owe, via Dakhla). If your paper ledger's જમા/ઉધાર means something else — e.g. જમા = cash actually received from veparis that day, ઉધાર = cash actually paid out (which could include vepari-side settlements, not just farmer payments) — that's a real, structural gap: it would mean a new "record a payment received from a vepari" feature needs building before Jansa Silak can be correct, not just a formula tweak.
-  4. Also worth checking: add a manual entry (e.g. a bank deposit), confirm it shows up correctly and that editing/deleting it updates the closing balance live.
-  5. Check that opening balance correctly carries forward — pick a day, note its closing balance, move to the next day, confirm that next day's opening balance matches exactly.
-- **Phase 8's own "done when" needs a real second account and device**: "a second staff login can be created and used from a second device/location." Deploy the updated `firestore.rules` first (see below), then:
-  1. As the owner, go to Settings → Users, invite a real second email address as "staff" with a location.
-  2. On a second device/browser (or an incognito window), go to the app, use "Create account" with that exact invited email, sign up with any password.
-  3. Confirm it lands on the dashboard (not the "Not set up yet" screen) with role showing "સ્ટાફ · Staff" and the right location.
-  4. Back on the owner's device, in Settings → Users, confirm the invite moved from "Pending invites" into the main user list.
-  5. As the staff account, confirm Settings shows the read-only note (not rate/user/profile controls) and that the Vepari list in Settings is view-only for them.
-  6. As the staff account, confirm they CAN still create/edit bills and record payments (per prd.md §3 — staff isn't read-only everywhere, just locked out of settings/rates/users).
-  7. Try inviting the SAME email a second time, or having an uninvited third email try "Create account" — both should be correctly rejected (already-invited: the invite doc write should fail or just silently succeed as re-sending the same invite, worth checking which; uninvited: should hit "Not set up yet" as before).
-- **`firestore.rules` has changed twice more since the last deploy** (Phase 8's invites, and now Phase 9's owner-only voiding) — **run `firebase deploy --only firestore:rules` before testing anything below.**
-- **Phase 9's year-end archive is hard to test for real without waiting a year** — the automatic prompt only fires on an actual FY rollover. To test without waiting:
-  1. Fastest check: Settings → Year-end backup (the manual trigger) → pick a past financial year with real bill data → download → open the zip → confirm it contains 5 files (bills, vepari_dakhla, rojmer, jansa_silak, vepari_master_list) and the numbers in each roughly match what the app shows for that same date range in Bills/Dakhla/Rojmer/Silak.
-  2. To test the automatic prompt itself, temporarily changing your device's system clock forward past April 1st is the practical option (or ask me for a debug bypass if that's inconvenient) — confirm it shows once, and doesn't show again on reload.
-  3. Confirm "Not now" dismisses without downloading, and that reloading the page afterward doesn't immediately re-show the prompt.
-- **Bill voiding needs a check, mirroring Rojmer's void test**: void a bill with the owner account, confirm it disappears from Dashboard's "bills today" count, from Dakhla, from Rojmer's pending list, and from Silak's જમા entries — but still shows (struck through) on the Bills screen itself. As a staff account, confirm the void button doesn't appear on Bills or Rojmer at all.
-- **Print needs a real-browser check, especially the two new custom templates**:
-  1. **First, fill in Settings → Business Profile's new fields** (proprietor name, address, mobile, license number) — until this is done, the printed કેશ મેમો/દાખલો will show blank space where that info belongs (deliberately, not a bug — see decisions log on why real personal details aren't hardcoded as a fallback).
-  2. On Bills, click Print next to any single bill — should open a new tab styled like the paper કેશ મેમો (red-ruled header, entry number/date, farmer/vepari fields, goods table, total, signature footer) with correct Gujarati text throughout. Compare directly against a real paper memo if one's handy.
-  3. On Dakhla → By vepari, select a vepari with a few bills, click Print — should open a landscape-oriented દાખલો matching the paper pad's layout, plus તોલાઈ/શેસ/કમિશન columns the paper form doesn't have (deliberate — that's this app's whole reason to exist for Dakhla).
-  4. On Bills' list export, Dakhla's all-veparis summary, and all of Rojmer/Silak, Print should still open the older generic tabular PDF (no custom template built for these — no reference photo was given) — confirm these still work as before, just via the new standalone button instead of the old dropdown item.
-  5. Worth trying on mobile too — mobile browsers handle "open HTML in a new tab" somewhat differently than desktop.
+Only items that still need the **owner** (code-side issues from the old list were audited and cleared 2026-09-05).
+
+- **Jansa Silak જમા/ઉધાર vs paper ledger** — still the only real business-logic open question. App treats જમા = bill amounts, ઉધાર = rojmer payments (see `useJansaSilak.js` header). Compare one known paper day; if paper means something else (e.g. cash collected from veparis), that needs a new feature, not a formula tweak.
+- **Owner smoke tests when convenient** (features are built; these prove them on real data/devices):
+  1. Offline bill add/edit → reconnect → reload (Phase 4).
+  2. Dakhla line math vs hand calc for one vepari (Phase 5).
+  3. Two offline devices each recording a payment on the same bill, then sync (Phase 6).
+  4. Invite a second email → create account on another browser → staff gates (Phase 8).
+  5. Settings → Year-end backup zip for a past FY (Phase 9).
+  6. Fill Business Profile, then Print one bill + one dakhla — compare to paper pads.
+- **`xlsx` npm advisory remains** — write-only export; no fix upstream; accepted (decisions log 2026-07-21).
+- 2026-09-05 — Deployed hosting + firestore.rules to https://shreenath-traders.web.app (owner request).

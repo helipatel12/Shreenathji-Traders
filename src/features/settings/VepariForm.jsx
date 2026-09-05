@@ -1,40 +1,53 @@
-// Add/edit form for a single vepari (Phase 3). More than 2 fields
-// (name, village, and 3 optional rate overrides), so this uses
-// react-hook-form + zod per rules.md §7 rather than manual useState.
-
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useEffect } from 'react'
-
-const schema = z
-  .object({
-    name: z.string().trim().min(1, 'Name is required'),
-    village: z.string().trim().min(1, 'Village is required'),
-    useCustomRates: z.boolean(),
-    tolai: z.coerce.number().min(0, 'Must be 0 or more').optional(),
-    shes: z.coerce.number().min(0, 'Must be 0 or more').optional(),
-    commission: z.coerce.number().min(0, 'Must be 0 or more').optional(),
-  })
-  .refine(
-    (data) =>
-      !data.useCustomRates ||
-      (data.tolai !== undefined && data.shes !== undefined && data.commission !== undefined),
-    {
-      message: 'Fill in all three rates, or turn custom rates off',
-      path: ['tolai'],
-    }
-  )
+import { useEffect, useMemo } from 'react'
+import { useLocale } from '../../context/LocaleContext'
+import { preprocessNumber, convertIndicDigits, parseLocaleNumber } from '../../utils/numbers'
 
 const inputClasses =
-  'text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-11 focus:border-accent focus:ring-2 focus:ring-accent-soft'
+  'text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 focus:border-accent focus:ring-2 focus:ring-accent-soft'
 
 export default function VepariForm({ initialValues, onSubmit, onCancel, submitLabel }) {
+  const { t } = useLocale()
+
+  const schema = useMemo(
+    () =>
+      z
+        .object({
+          name: z.string().trim().min(1, t('bills.required')),
+          village: z.string().trim().min(1, t('bills.required')),
+          useCustomRates: z.boolean(),
+          tolai: z.preprocess(preprocessNumber, z.number().min(0, t('common.mustBeZeroOrMore')).optional()),
+          shes: z.preprocess(preprocessNumber, z.number().min(0, t('common.mustBeZeroOrMore')).optional()),
+          commission: z.preprocess(
+            preprocessNumber,
+            z.number().min(0, t('common.mustBeZeroOrMore')).optional(),
+          ),
+        })
+        .refine(
+          (data) =>
+            !data.useCustomRates ||
+            (data.tolai !== undefined &&
+              data.shes !== undefined &&
+              data.commission !== undefined &&
+              !Number.isNaN(data.tolai) &&
+              !Number.isNaN(data.shes) &&
+              !Number.isNaN(data.commission)),
+          {
+            message: t('common.fillAllRates'),
+            path: ['tolai'],
+          },
+        ),
+    [t],
+  )
+
   const {
     register,
     handleSubmit,
     watch,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
@@ -58,8 +71,13 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
     const payload = {
       name: values.name,
       village: values.village,
+      // Canonical keys match business.defaultRates / DEFAULT_RATES / calc.js
       customRates: values.useCustomRates
-        ? { tolai: values.tolai, shes: values.shes, commission: values.commission }
+        ? {
+            tolaiPerKg: parseLocaleNumber(values.tolai),
+            shesPercent: parseLocaleNumber(values.shes),
+            commissionPercent: parseLocaleNumber(values.commission),
+          }
         : null,
     }
     await onSubmit(payload)
@@ -69,17 +87,15 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
     <form onSubmit={handleSubmit(submit)} className="space-y-4">
       <div>
         <label htmlFor="vepari-name" className="block text-caption text-ink-muted mb-1.5">
-          Name
+          {t('settings.vepariName')}
         </label>
         <input id="vepari-name" className={inputClasses} {...register('name')} />
-        {errors.name && (
-          <p className="text-caption text-danger mt-1">{errors.name.message}</p>
-        )}
+        {errors.name && <p className="text-caption text-danger mt-1">{errors.name.message}</p>}
       </div>
 
       <div>
         <label htmlFor="vepari-village" className="block text-caption text-ink-muted mb-1.5">
-          Village
+          {t('settings.vepariVillage')}
         </label>
         <input id="vepari-village" className={inputClasses} {...register('village')} />
         {errors.village && (
@@ -87,41 +103,53 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
         )}
       </div>
 
-      <label className="flex items-center gap-2 text-body text-ink min-h-11">
+      <label className="flex items-center gap-2 text-body text-ink min-h-12">
         <input
           type="checkbox"
           className="h-4 w-4 accent-[#2B4238]"
           {...register('useCustomRates')}
         />
-        Use custom rates for this vepari
+        {t('settings.useCustomRates')}
       </label>
 
       {useCustomRates && (
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label htmlFor="vepari-tolai" className="block text-caption text-ink-muted mb-1.5">
-              Tolai
+              {t('settings.tolaiPerKgLabel')}
             </label>
             <input
               id="vepari-tolai"
-              type="number"
-              step="any"
+              type="text"
               inputMode="decimal"
+              lang="gu"
               className={inputClasses}
-              {...register('tolai')}
+              {...register('tolai', {
+                onChange: (e) =>
+                  setValue('tolai', convertIndicDigits(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  }),
+              })}
             />
           </div>
           <div>
             <label htmlFor="vepari-shes" className="block text-caption text-ink-muted mb-1.5">
-              Shes %
+              {t('settings.shesPercentLabel')}
             </label>
             <input
               id="vepari-shes"
-              type="number"
-              step="any"
+              type="text"
               inputMode="decimal"
+              lang="gu"
               className={inputClasses}
-              {...register('shes')}
+              {...register('shes', {
+                onChange: (e) =>
+                  setValue('shes', convertIndicDigits(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  }),
+              })}
             />
           </div>
           <div>
@@ -129,15 +157,21 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
               htmlFor="vepari-commission"
               className="block text-caption text-ink-muted mb-1.5"
             >
-              Commission %
+              {t('settings.commissionPercentLabel')}
             </label>
             <input
               id="vepari-commission"
-              type="number"
-              step="any"
+              type="text"
               inputMode="decimal"
+              lang="gu"
               className={inputClasses}
-              {...register('commission')}
+              {...register('commission', {
+                onChange: (e) =>
+                  setValue('commission', convertIndicDigits(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  }),
+              })}
             />
           </div>
           {errors.tolai && (
@@ -150,7 +184,7 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
         <button
           type="submit"
           disabled={isSubmitting}
-          className="flex-1 min-h-11 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body disabled:opacity-40"
+          className="flex-1 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body disabled:opacity-40"
         >
           {submitLabel}
         </button>
@@ -158,9 +192,9 @@ export default function VepariForm({ initialValues, onSubmit, onCancel, submitLa
           <button
             type="button"
             onClick={onCancel}
-            className="min-h-11 px-5 rounded-xl border border-border text-body text-ink-muted"
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         )}
       </div>

@@ -17,12 +17,22 @@ import { businessRef } from '../firebase/firestore'
 export function useBusiness() {
   const [business, setBusiness] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(businessRef(), (snap) => {
-      setBusiness(snap.exists() ? { id: snap.id, ...snap.data() } : null)
-      setLoading(false)
-    })
+    const unsubscribe = onSnapshot(
+      businessRef(),
+      (snap) => {
+        setBusiness(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+        setError(null)
+        setLoading(false)
+      },
+      (err) => {
+        console.error('Business snapshot failed:', err)
+        setError(err)
+        setLoading(false)
+      },
+    )
     return unsubscribe
   }, [])
 
@@ -30,5 +40,5 @@ export function useBusiness() {
     await updateDoc(businessRef(), changes)
   }
 
-  return { business, loading, updateBusiness }
+  return { business, loading, error, updateBusiness }
 }

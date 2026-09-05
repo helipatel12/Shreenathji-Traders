@@ -4,24 +4,34 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useEffect } from 'react'
-import gu from '../../locales/gu.json'
+import { useEffect, useMemo } from 'react'
+import { useLocale } from '../../context/LocaleContext'
+import { preprocessNumber, convertIndicDigits } from '../../utils/numbers'
 
 const inputClasses =
-  'text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-11 focus:border-accent focus:ring-2 focus:ring-accent-soft'
-
-const schema = z.object({
-  label: z.string().trim().min(1, 'Required'),
-  amount: z.coerce.number().positive('Must be more than 0'),
-  side: z.enum(['jama', 'udhar']),
-  date: z.string().min(1, 'Required'),
-})
+  'text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 focus:border-accent focus:ring-2 focus:ring-accent-soft'
 
 export default function ManualEntryForm({ initialValues, defaultDate, onSubmit, onCancel }) {
+  const { t } = useLocale()
+  const schema = useMemo(
+    () =>
+      z.object({
+        label: z.string().trim().min(1, t('bills.required')),
+        amount: z.preprocess(
+          preprocessNumber,
+          z.number().positive(t('bills.mustBePositive')),
+        ),
+        side: z.enum(['jama', 'udhar']),
+        date: z.string().min(1, t('bills.required')),
+      }),
+    [t],
+  )
+
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
@@ -36,39 +46,47 @@ export default function ManualEntryForm({ initialValues, defaultDate, onSubmit, 
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
         <label htmlFor="label" className="block text-caption text-ink-muted mb-1.5">
-          {gu.silak.labelField}
+          {t('silak.labelField')}
         </label>
-        <input id="label" className={inputClasses} placeholder="e.g. Bank deposit" {...register('label')} />
+        <input id="label" className={inputClasses} {...register('label')} />
         {errors.label && <p className="text-caption text-danger mt-1">{errors.label.message}</p>}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
           <label htmlFor="amount" className="block text-caption text-ink-muted mb-1.5">
-            {gu.silak.amountField}
+            {t('silak.amountField')}
           </label>
           <input
             id="amount"
-            type="number"
-            step="any"
+            type="text"
             inputMode="decimal"
+            lang="gu"
+            placeholder="૫૦૦ / 500"
             className={inputClasses}
-            {...register('amount')}
+            {...register('amount', {
+              onChange: (e) => {
+                setValue('amount', convertIndicDigits(e.target.value), {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              },
+            })}
           />
           {errors.amount && <p className="text-caption text-danger mt-1">{errors.amount.message}</p>}
         </div>
         <div>
           <label htmlFor="side" className="block text-caption text-ink-muted mb-1.5">
-            {gu.silak.sideField}
+            {t('silak.sideField')}
           </label>
           <select id="side" className={inputClasses} {...register('side')}>
-            <option value="jama">{gu.silak.jamaLabel}</option>
-            <option value="udhar">{gu.silak.udharLabel}</option>
+            <option value="jama">{t('silak.jamaLabel')}</option>
+            <option value="udhar">{t('silak.udharLabel')}</option>
           </select>
         </div>
         <div>
           <label htmlFor="date" className="block text-caption text-ink-muted mb-1.5">
-            {gu.silak.dateField}
+            {t('silak.dateField')}
           </label>
           <input id="date" type="date" className={inputClasses} {...register('date')} />
           {errors.date && <p className="text-caption text-danger mt-1">{errors.date.message}</p>}
@@ -79,17 +97,19 @@ export default function ManualEntryForm({ initialValues, defaultDate, onSubmit, 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="flex-1 min-h-11 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body disabled:opacity-40"
+          className="flex-1 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-body disabled:opacity-40"
         >
-          {gu.silak.save}
+          {t('silak.save')}
         </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="min-h-11 px-5 rounded-xl border border-border text-body text-ink-muted"
-        >
-          {gu.silak.cancel}
-        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
+          >
+            {t('silak.cancel')}
+          </button>
+        )}
       </div>
     </form>
   )

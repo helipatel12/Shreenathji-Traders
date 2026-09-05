@@ -1,19 +1,20 @@
-// Bills (કેશ મેમો) — Phase 4. List + add/edit + export. Entry numbers
-// (નોંધ નં., design.md §4) are derived from creation order by
-// useBills, not stored — see that hook's header comment for why.
-
 import { useMemo, useState } from 'react'
 import { Plus, Pencil, History, Ban } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useBills } from '../../hooks/useBills'
 import { useVeparis } from '../../hooks/useVeparis'
 import { useBusiness } from '../../hooks/useBusiness'
-import { formatCurrency } from '../../utils/calc'
+import { useLocale } from '../../context/LocaleContext'
+import { excludeVoided } from '../../utils/calc'
 import { todayKeyIST } from '../../utils/dates'
-import gu from '../../locales/gu.json'
+import { findVepari, vepariDisplayName, vepariStableId } from '../../utils/vepari'
 import BillForm, { billToFormValues } from './BillForm'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
+import ReadOnlyBanner from '../../components/ReadOnlyBanner'
+import DataTable from '../../components/DataTable'
+import TableToolbar from '../../components/TableToolbar'
+import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printBill } from './billPrint'
 import {
@@ -23,23 +24,21 @@ import {
   buildBillListPdfColumns,
 } from './billExport'
 
-function vepariName(veparis, vepariId) {
-  return veparis.find((v) => String(v.id) === String(vepariId))?.name ?? '—'
-}
-
 function EditHistoryList({ editHistory }) {
+  const { t, lang } = useLocale()
   if (!editHistory?.length) return null
+  const locale = lang === 'gu' ? 'gu-IN' : 'en-IN'
   return (
     <div className="mt-3 pt-3 border-t border-border">
       <p className="text-caption text-ink-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
         <History size={14} strokeWidth={1.75} />
-        Edit history
+        {t('bills.editHistory')}
       </p>
       <ul className="space-y-1">
         {editHistory.map((entry, i) => (
           <li key={i} className="text-caption text-ink-muted">
-            <span className="text-ink">{entry.field}</span> changed —{' '}
-            {new Date(entry.editedAt).toLocaleString('en-IN')}
+            <span className="text-ink">{entry.field}</span> —{' '}
+            {new Date(entry.editedAt).toLocaleString(locale)}
           </li>
         ))}
       </ul>
@@ -48,35 +47,36 @@ function EditHistoryList({ editHistory }) {
 }
 
 function VoidConfirmDialog({ onConfirm, onCancel }) {
+  const { t } = useLocale()
   const [reason, setReason] = useState('')
   return (
     <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
       <div className="card px-5 py-5 max-w-sm w-full">
-        <p className="text-body text-ink font-semibold mb-1">{gu.bills.voidConfirmTitle}</p>
-        <p className="text-caption text-ink-muted mb-4">{gu.bills.voidConfirmBody}</p>
+        <p className="text-body text-ink font-semibold mb-1">{t('bills.voidConfirmTitle')}</p>
+        <p className="text-caption text-ink-muted mb-4">{t('bills.voidConfirmBody')}</p>
         <label htmlFor="bill-void-reason" className="block text-caption text-ink-muted mb-1.5">
-          {gu.bills.voidReasonLabel}
+          {t('bills.voidReasonLabel')}
         </label>
         <input
           id="bill-void-reason"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          className="text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-11 mb-4 focus:border-accent focus:ring-2 focus:ring-accent-soft"
+          className="text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 mb-4 focus:border-accent focus:ring-2 focus:ring-accent-soft"
         />
         <div className="flex gap-3">
           <button
             type="button"
             onClick={() => onConfirm(reason)}
-            className="flex-1 min-h-11 rounded-xl bg-danger text-surface font-semibold text-body"
+            className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body"
           >
-            {gu.bills.confirmVoid}
+            {t('bills.confirmVoid')}
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="min-h-11 px-5 rounded-xl border border-border text-body text-ink-muted"
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
           >
-            {gu.bills.cancel}
+            {t('bills.cancel')}
           </button>
         </div>
       </div>
@@ -85,26 +85,77 @@ function VoidConfirmDialog({ onConfirm, onCancel }) {
 }
 
 export default function BillsScreen() {
-  const { user, role } = useAuth()
-  const isOwner = role === 'owner'
+  const { user, isOwner, canWrite } = useAuth()
+  const { t, formatCurrency, formatDigits } = useLocale()
   const { bills, loading, addBill, updateBill, voidBill } = useBills()
   const { veparis } = useVeparis()
   const { business } = useBusiness()
-  const [mode, setMode] = useState('list') // 'list' | 'add' | { edit: localId }
+  const [mode, setMode] = useState('list')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [voidingBillId, setVoidingBillId] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [vepariFilter, setVepariFilter] = useState('')
+  // Default: note ascending. Changing date/note sort switches the active key.
+  const [sortKey, setSortKey] = useState('entryNumber') // entryNumber | date
+  const [sortDir, setSortDir] = useState('asc') // asc | desc
 
   const editingBill =
     typeof mode === 'object' && mode.edit != null ? bills.find((b) => b.id === mode.edit) : null
 
   const filteredBills = useMemo(() => {
-    return bills.filter((bill) => {
+    const q = search.trim().toLowerCase()
+    const list = excludeVoided(bills).filter((bill) => {
       if (fromDate && bill.date < fromDate) return false
       if (toDate && bill.date > toDate) return false
-      return true
+      if (vepariFilter && String(bill.vepariId) !== String(vepariFilter)) return false
+      if (!q) return true
+      const vepariName = vepariDisplayName(veparis, bill.vepariId).toLowerCase()
+      return (
+        String(bill.farmerName || '').toLowerCase().includes(q) ||
+        String(bill.farmerVillage || '').toLowerCase().includes(q) ||
+        String(bill.entryNumber || '').toLowerCase().includes(q) ||
+        vepariName.includes(q)
+      )
     })
-  }, [bills, fromDate, toDate])
+
+    const dir = sortDir === 'desc' ? -1 : 1
+    return list.slice().sort((a, b) => {
+      if (sortKey === 'date') {
+        if (a.date < b.date) return -1 * dir
+        if (a.date > b.date) return 1 * dir
+        // Stable tie-break by note no.
+        return (Number(a.entryNumber) || 0) - (Number(b.entryNumber) || 0)
+      }
+      const na = Number(a.entryNumber) || 0
+      const nb = Number(b.entryNumber) || 0
+      if (na !== nb) return (na - nb) * dir
+      if (a.date < b.date) return -1
+      if (a.date > b.date) return 1
+      return 0
+    })
+  }, [bills, fromDate, toDate, search, vepariFilter, veparis, sortKey, sortDir])
+
+  function setNoteSort(value) {
+    if (!value) {
+      setSortKey('entryNumber')
+      setSortDir('asc')
+      return
+    }
+    setSortKey('entryNumber')
+    setSortDir(value)
+  }
+
+  function setDateSort(value) {
+    if (!value) {
+      setSortKey('date')
+      setSortDir('asc')
+      return
+    }
+    setSortKey('date')
+    setSortDir(value)
+  }
 
   async function handleAdd(payload) {
     await addBill({ ...payload, createdBy: user?.email })
@@ -127,9 +178,9 @@ export default function BillsScreen() {
   }
 
   function exportSingleBill(bill, format) {
-    const name = vepariName(veparis, bill.vepariId)
+    const name = vepariDisplayName(veparis, bill.vepariId)
     const filename = `bill_${bill.entryNumber}_${bill.farmerName.replace(/\s+/g, '_')}`
-    const title = `${gu.bills.entryNumberLabel} ${bill.entryNumber} — ${bill.farmerName} (${name})`
+    const title = `${t('bills.entryNumberLabel')} ${bill.entryNumber} — ${bill.farmerName} (${name})`
     if (format === 'excel') exportRowsToExcel(buildSingleBillRows(bill, name), filename, 'Bill')
     if (format === 'csv') exportRowsToCSV(buildSingleBillRows(bill, name), filename)
     if (format === 'pdf') {
@@ -138,8 +189,12 @@ export default function BillsScreen() {
   }
 
   function printSingleBill(bill) {
-    const vepari = veparis.find((v) => String(v.id) === String(bill.vepariId))
-    printBill(bill, { business, vepariName: vepari?.name ?? '—', vepariVillage: vepari?.village })
+    const vepari = findVepari(veparis, bill.vepariId)
+    printBill(bill, {
+      business,
+      vepariName: vepari?.name ?? '—',
+      vepariVillage: vepari?.village,
+    })
   }
 
   function exportList(format) {
@@ -154,40 +209,149 @@ export default function BillsScreen() {
     printRows(buildBillListRows(filteredBills, veparis), buildBillListPdfColumns(), 'Bills')
   }
 
+  const columns = [
+    {
+      key: 'entryNumber',
+      header: t('bills.entryNumberLabel'),
+      filter: {
+        value: sortKey === 'entryNumber' ? sortDir : '',
+        onChange: setNoteSort,
+        allLabel: t('bills.sortNote'),
+        options: [
+          { value: 'asc', label: t('bills.sortNoteAsc') },
+          { value: 'desc', label: t('bills.sortNoteDesc') },
+        ],
+      },
+      render: (bill) => (
+        <span className="font-numeric font-semibold">
+          {formatDigits(bill.entryNumber)}
+          {bill.syncStatus === 'pending' && (
+            <span className="badge badge-amber ml-2">{t('common.syncing')}</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'date',
+      header: t('bills.dateLabel'),
+      filter: {
+        value: sortKey === 'date' ? sortDir : '',
+        onChange: setDateSort,
+        allLabel: t('bills.sortDate'),
+        options: [
+          { value: 'asc', label: t('bills.sortDateOlder') },
+          { value: 'desc', label: t('bills.sortDateNewer') },
+        ],
+      },
+      render: (bill) => (
+        <span className="font-numeric whitespace-nowrap">{formatDigits(bill.date)}</span>
+      ),
+    },
+    {
+      key: 'farmer',
+      header: t('bills.farmerNameLabel'),
+      render: (bill) => (
+        <div>
+          <p className="font-semibold text-ink">{bill.farmerName}</p>
+          <p className="text-caption text-ink-muted">{bill.farmerVillage}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'vepari',
+      header: t('bills.vepariLabel'),
+      filter: {
+        value: vepariFilter,
+        onChange: setVepariFilter,
+        allLabel: t('bills.allVeparis'),
+        options: veparis.map((v) => ({
+          value: String(vepariStableId(v)),
+          label: v.name,
+        })),
+      },
+      render: (bill) => (
+        <span className="badge badge-blue">{vepariDisplayName(veparis, bill.vepariId)}</span>
+      ),
+    },
+    {
+      key: 'total',
+      header: t('bills.totalLabel'),
+      align: 'right',
+      render: (bill) => (
+        <span className="font-semibold">{formatCurrency(bill.totalAmount)}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      render: (bill) => (
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <PrintButton compact onClick={() => printSingleBill(bill)} />
+          <ExportMenu
+            compact
+            onExportExcel={() => exportSingleBill(bill, 'excel')}
+            onExportCSV={() => exportSingleBill(bill, 'csv')}
+            onExportPDF={() => exportSingleBill(bill, 'pdf')}
+          />
+          {canWrite && (
+            <button
+              type="button"
+              className="action-btn action-btn-edit"
+              aria-label={t('common.edit')}
+              onClick={() => setMode({ edit: bill.id })}
+            >
+              <Pencil size={14} strokeWidth={2} />
+            </button>
+          )}
+          {isOwner && (
+            <button
+              type="button"
+              className="action-btn action-btn-danger"
+              aria-label={t('bills.void')}
+              onClick={() => setVoidingBillId(bill.id)}
+            >
+              <Ban size={14} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ]
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      {!canWrite && <ReadOnlyBanner />}
+
+      <div className="flex items-center justify-between gap-3 mb-6">
         <div>
-          <p className="font-numeric text-caption text-ink-muted tracking-wide uppercase">
-            {gu.bills.titleGu}
-          </p>
-          <h1 className="font-display text-heading text-ink font-semibold mt-1">Bills</h1>
+          <h1 className="page-title">{t('bills.titleEn')}</h1>
+          <p className="text-body text-ink-muted mt-1">{t('bills.title')}</p>
         </div>
-        {mode === 'list' && (
-          <button
-            type="button"
-            onClick={() => setMode('add')}
-            className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body"
-          >
+        {mode === 'list' && canWrite && (
+          <button type="button" onClick={() => setMode('add')} className="btn-primary">
             <Plus size={18} strokeWidth={2} />
-            {gu.dashboard.newBill}
+            {t('dashboard.newBill')}
           </button>
         )}
       </div>
 
-      {mode === 'add' && (
+      {mode === 'add' && canWrite && (
         <div className="card px-5 py-5 mb-6">
-          <BillForm onSubmit={handleAdd} onCancel={() => setMode('list')} submitLabel={gu.bills.saveBill} />
+          <BillForm
+            onSubmit={handleAdd}
+            onCancel={() => setMode('list')}
+            submitLabel={t('bills.saveBill')}
+          />
         </div>
       )}
 
-      {editingBill && (
+      {editingBill && canWrite && (
         <div className="card px-5 py-5 mb-6">
           <BillForm
             initialValues={billToFormValues(editingBill)}
             onSubmit={handleUpdate}
             onCancel={() => setMode('list')}
-            submitLabel={gu.bills.saveChanges}
+            submitLabel={t('bills.saveChanges')}
           />
           <EditHistoryList editHistory={editingBill.editHistory} />
         </div>
@@ -195,115 +359,65 @@ export default function BillsScreen() {
 
       {mode === 'list' && (
         <>
-          {bills.length > 0 && (
-            <div className="flex flex-wrap items-end gap-3 mb-4">
-              <div>
-                <label className="block text-caption text-ink-muted mb-1.5">From</label>
-                <input
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-                />
-              </div>
-              <div>
-                <label className="block text-caption text-ink-muted mb-1.5">To</label>
-                <input
-                  type="date"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="text-body text-ink bg-surface border border-border rounded-xl py-2 px-3 min-h-11"
-                />
-              </div>
-              <PrintButton onClick={printList} />
-              <ExportMenu
-                label={`Export list (${filteredBills.length})`}
-                onExportExcel={() => exportList('excel')}
-                onExportCSV={() => exportList('csv')}
-                onExportPDF={() => exportList('pdf')}
-              />
-            </div>
-          )}
-
           {loading ? (
-            <p className="text-caption text-ink-muted">Loading…</p>
-          ) : filteredBills.length === 0 ? (
-            <div className="card px-5 py-5 max-w-md">
-              <p className="text-body text-ink-muted">
-                {bills.length === 0
-                  ? 'No bills yet — the first one you save will show up here.'
-                  : 'No bills in that date range.'}
-              </p>
-            </div>
+            <SkeletonTable rows={6} cols={5} />
           ) : (
-            <ul className="space-y-3 max-w-2xl">
-              {filteredBills.map((bill) => (
-                <li key={bill.id} className="card px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`min-w-0 ${bill.isVoided ? 'opacity-60' : ''}`}>
-                      <p className="text-caption text-ink-muted">
-                        {gu.bills.entryNumberLabel} {bill.entryNumber}
-                        {bill.syncStatus === 'pending' && !bill.isVoided && (
-                          <span className="text-accent"> · syncing…</span>
-                        )}
-                        {bill.isVoided && (
-                          <span className="text-danger"> · {gu.bills.voidedBadge}</span>
-                        )}
-                      </p>
-                      <p
-                        className={`text-body text-ink mt-0.5 truncate ${
-                          bill.isVoided ? 'line-through' : ''
-                        }`}
-                      >
-                        {bill.farmerName}
-                        <span className="text-ink-muted"> · {bill.farmerVillage}</span>
-                      </p>
-                      <p className="text-caption text-ink-muted mt-0.5">
-                        {bill.date} · {vepariName(veparis, bill.vepariId)}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                      <p
-                        className={`font-numeric text-body text-ink font-semibold ${
-                          bill.isVoided ? 'opacity-60 line-through' : ''
-                        }`}
-                      >
-                        {formatCurrency(bill.totalAmount)}
-                      </p>
-                      {!bill.isVoided && (
-                        <div className="flex items-center gap-1">
-                          <PrintButton label="" onClick={() => printSingleBill(bill)} />
+            <DataTable
+              columns={columns}
+              rows={filteredBills}
+              rowKey="id"
+              selectedKey={selectedId}
+              onRowClick={(bill) =>
+                setSelectedId((id) => (id === bill.id ? null : bill.id))
+              }
+              empty={
+                <p className="text-body text-ink-muted">
+                  {excludeVoided(bills).length === 0 ? t('bills.emptyList') : t('bills.emptyRange')}
+                </p>
+              }
+              meta={t('common.showingCount', { count: formatDigits(filteredBills.length) })}
+              toolbar={
+                <TableToolbar
+                  search={search}
+                  onSearchChange={setSearch}
+                  searchPlaceholder={t('bills.searchPlaceholder')}
+                  actions={
+                    <>
+                      <input
+                        type="date"
+                        value={fromDate}
+                        onChange={(e) => setFromDate(e.target.value)}
+                        aria-label={t('common.from')}
+                        className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                      />
+                      <input
+                        type="date"
+                        value={toDate}
+                        onChange={(e) => setToDate(e.target.value)}
+                        aria-label={t('common.to')}
+                        className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                      />
+                      {excludeVoided(bills).length > 0 && (
+                        <>
+                          <PrintButton onClick={printList} />
                           <ExportMenu
-                            label=""
-                            onExportExcel={() => exportSingleBill(bill, 'excel')}
-                            onExportCSV={() => exportSingleBill(bill, 'csv')}
-                            onExportPDF={() => exportSingleBill(bill, 'pdf')}
+                            label={t('bills.exportList', { count: filteredBills.length })}
+                            onExportExcel={() => exportList('excel')}
+                            onExportCSV={() => exportList('csv')}
+                            onExportPDF={() => exportList('pdf')}
                           />
-                          <button
-                            type="button"
-                            onClick={() => setMode({ edit: bill.id })}
-                            aria-label={`Edit bill ${bill.entryNumber}`}
-                            className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-accent"
-                          >
-                            <Pencil size={18} strokeWidth={1.75} />
-                          </button>
-                          {isOwner && (
-                            <button
-                              type="button"
-                              onClick={() => setVoidingBillId(bill.id)}
-                              aria-label={`Void bill ${bill.entryNumber}`}
-                              className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-danger"
-                            >
-                              <Ban size={18} strokeWidth={1.75} />
-                            </button>
-                          )}
-                        </div>
+                        </>
                       )}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    </>
+                  }
+                />
+              }
+              renderExpanded={(bill) =>
+                bill.editHistory?.length ? (
+                  <EditHistoryList editHistory={bill.editHistory} />
+                ) : null
+              }
+            />
           )}
         </>
       )}

@@ -1,44 +1,82 @@
-// Bill entry (કેશ મેમો) — Phase 4. Local-first per rules.md §5: every
-// mutation writes to Dexie immediately, then syncs to Firestore in
-// the background — this is the phase phases.md's build-order note
-// calls out as the real test of the offline-first bet, so the
-// pattern here matters more than in Phase 3's simpler vepari CRUD.
-//
-// Unlike veparis (Phase 3, freely editable) or payments (Phase 6,
-// strictly append-only per architecture.md §2), bills sit in between:
-// directly editable, but every edit appends to `editHistory` instead
-// of silently overwriting (architecture.md §5a). Item-level fields are
-// diffed as a whole array, not line-by-line — see memory.md's
-// decisions log for that scope call.
-//
-// Entry numbers (નોંધ નં., design.md §4) are derived from creation
-// order at read time, not stored as an incrementing counter — a
-// stored counter is exactly the kind of "running total two offline
-// devices could collide on" architecture.md §7 warns against; a
-// derived position has no shared state to conflict over.
-
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
 import { billCollectionRef, billDocRef } from '../firebase/firestore'
 import { computeBillTotal } from '../utils/calc'
 import { diffFields } from '../utils/editHistory'
+import {
+  upsertByFirestoreId,
+  removeMissingSynced,
+  dedupeTableByFirestoreId,
+} from '../utils/syncHelpers'
 
 const EDITABLE_FIELDS = ['farmerName', 'farmerVillage', 'vepariId', 'date', 'items']
+
+/**
+ * Next નોંધ નં. = lowest free positive integer among active (non-voided) bills.
+ * Gaps are filled; existing numbers are never renumbered.
+ * Voided numbers are free to reuse (they do not hold the slot).
+ */
+async function nextEntryNumber() {
+  const rows = await localDb.bills.toArray()
+  const used = new Set()
+  for (const row of rows) {
+    if (row.isVoided) continue
+    const n = Number(row.entryNumber)
+    if (Number.isFinite(n) && n > 0) used.add(n)
+  }
+  let n = 1
+  while (used.has(n)) n += 1
+  return n
+}
+
+/**
+ * One-time backfill for legacy rows missing entryNumber.
+ * Writes permanently to Dexie — never reshuffles numbers that already exist.
+ */
+async function persistMissingEntryNumbers() {
+  const rows = await localDb.bills.toArray()
+  const used = new Set()
+  for (const row of rows) {
+    const n = Number(row.entryNumber)
+    if (Number.isFinite(n) && n > 0) used.add(n)
+  }
+
+  const missing = rows
+    .filter((row) => row.entryNumber == null || row.entryNumber === '')
+    .sort((a, b) => (a.createdAtLocal || 0) - (b.createdAtLocal || 0))
+
+  for (const row of missing) {
+    let n = 1
+    while (used.has(n)) n += 1
+    used.add(n)
+    await localDb.bills.update(row.id, { entryNumber: n, syncStatus: 'pending' })
+    if (row.firestoreId) {
+      try {
+        await updateDoc(billDocRef(row.firestoreId), { entryNumber: n })
+        await localDb.bills.update(row.id, { syncStatus: 'synced' })
+      } catch (err) {
+        console.error('entryNumber backfill sync failed:', err)
+      }
+    }
+  }
+}
 
 export function useBills() {
   const [bills, setBills] = useState([])
   const [loading, setLoading] = useState(true)
 
   const refreshLocal = useCallback(async () => {
+    await dedupeTableByFirestoreId(localDb.bills)
+    await persistMissingEntryNumbers()
     const rows = await localDb.bills.toArray()
-    // Oldest first, so index+1 gives a stable-once-synced entry number.
     rows.sort((a, b) => {
-      const ta = a.createdAtLocal || 0
-      const tb = b.createdAtLocal || 0
-      return ta - tb
+      const na = Number(a.entryNumber) || 0
+      const nb = Number(b.entryNumber) || 0
+      if (na !== nb) return na - nb
+      return (a.createdAtLocal || 0) - (b.createdAtLocal || 0)
     })
-    setBills(rows.map((row, index) => ({ ...row, entryNumber: index + 1 })))
+    setBills(rows)
   }, [])
 
   useEffect(() => {
@@ -46,29 +84,32 @@ export function useBills() {
   }, [refreshLocal])
 
   useEffect(() => {
+    let cancelled = false
     const unsubscribe = onSnapshot(billCollectionRef(), async (snapshot) => {
       for (const docSnap of snapshot.docs) {
-        const remote = { firestoreId: docSnap.id, ...docSnap.data(), syncStatus: 'synced' }
-        const existing = await localDb.bills.where('firestoreId').equals(docSnap.id).first()
-        if (existing) {
-          await localDb.bills.update(existing.id, remote)
-        } else {
-          await localDb.bills.add(remote)
-        }
+        if (cancelled) return
+        const data = docSnap.data()
+        await upsertByFirestoreId(localDb.bills, docSnap.id, {
+          firestoreId: docSnap.id,
+          ...data,
+          createdAtLocal: data.createdAtLocal || Date.now(),
+        })
       }
-      const remoteIds = new Set(snapshot.docs.map((d) => d.id))
-      const syncedRows = await localDb.bills.where('syncStatus').equals('synced').toArray()
-      for (const row of syncedRows) {
-        if (row.firestoreId && !remoteIds.has(row.firestoreId)) {
-          await localDb.bills.delete(row.id)
-        }
-      }
+      if (cancelled) return
+      await removeMissingSynced(
+        localDb.bills,
+        new Set(snapshot.docs.map((d) => d.id)),
+      )
       await refreshLocal()
     })
-    return unsubscribe
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [refreshLocal])
 
   async function addBill({ farmerName, farmerVillage, vepariId, date, items, createdBy, locationId }) {
+    const entryNumber = await nextEntryNumber()
     const payload = {
       farmerName: farmerName.trim(),
       farmerVillage: farmerVillage.trim(),
@@ -78,11 +119,9 @@ export function useBills() {
       totalAmount: computeBillTotal(items),
       createdBy,
       locationId: locationId || null,
+      entryNumber,
       editHistory: [],
     }
-    // Same up-front-ID pattern as useVeparis.js, to avoid the live
-    // listener's local-cache echo racing a manual "mark synced" step
-    // and inserting a duplicate row.
     const ref = doc(billCollectionRef())
     const localId = await localDb.bills.add({
       ...payload,
@@ -95,8 +134,6 @@ export function useBills() {
       await setDoc(ref, { ...payload, createdAt: serverTimestamp() })
       await localDb.bills.update(localId, { syncStatus: 'synced' })
     } catch (err) {
-      // Bill stays saved locally either way (rules.md §4) — this is
-      // exactly the offline-save case Phase 4 needs to survive.
       console.error('Bill save queued locally — Firestore sync failed:', err)
     }
     await refreshLocal()
@@ -107,14 +144,21 @@ export function useBills() {
     const existing = await localDb.bills.get(localId)
     if (!existing) return
 
-    const newValues = { ...existing, ...changes }
-    if (changes.items) {
-      newValues.totalAmount = computeBillTotal(changes.items)
+    // નોંધ નં. is immutable after create — strip any accidental change.
+    const { entryNumber: _ignoreEntry, ...safeChanges } = changes || {}
+
+    const newValues = { ...existing, ...safeChanges }
+    if (safeChanges.items) {
+      newValues.totalAmount = computeBillTotal(safeChanges.items)
     }
     const newHistoryEntries = diffFields(existing, newValues, EDITABLE_FIELDS, editedBy)
     const editHistory = [...(existing.editHistory || []), ...newHistoryEntries]
 
-    const localUpdate = { ...changes, totalAmount: newValues.totalAmount, editHistory }
+    const localUpdate = {
+      ...safeChanges,
+      totalAmount: newValues.totalAmount,
+      editHistory,
+    }
     await localDb.bills.update(localId, {
       ...localUpdate,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
@@ -132,19 +176,6 @@ export function useBills() {
     }
   }
 
-  // Voiding, not deleting — bills can never be deleted
-  // (firestore.rules' `allow delete: if false`, rules.md §3's "never
-  // auto-delete financial data"), same reasoning as payments'
-  // voidPayment() in usePayments.js. A bill entered entirely by
-  // mistake (wrong farmer, duplicate) is marked voided instead: it
-  // stays visible in the Bills list (struck through) with its entry
-  // number and full history intact, but is excluded from every
-  // downstream calculation — dashboard summary, dakhla, rojmer,
-  // silak, and the year-end archive all filter through calc.js's
-  // excludeVoided() before using bills for anything but display.
-  // Owner-only at the firestore.rules level (staff can still create/
-  // edit bills, but not void them) — see firestore.rules' comment on
-  // the bills match block.
   async function voidBill(localId, reason, voidedBy) {
     const existing = await localDb.bills.get(localId)
     if (!existing || existing.isVoided) return

@@ -10,13 +10,14 @@
 // longer represent real money received.
 
 import { formatCurrency } from '../../utils/calc'
+import { vepariDisplayName } from '../../utils/vepari'
 import gu from '../../locales/gu.json'
 
 export function buildRojmerRows(rows, veparis, payments) {
   const exportRows = []
 
   for (const { bill, balance, isCleared, clearingDate } of rows) {
-    const vepari = veparis.find((v) => String(v.id) === String(bill.vepariId))?.name ?? '—'
+    const vepari = vepariDisplayName(veparis, bill.vepariId)
     const billPayments = payments
       .filter((p) => p.billId === bill.firestoreId && !p.isVoided)
       .slice()

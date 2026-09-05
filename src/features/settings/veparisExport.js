@@ -5,11 +5,14 @@
 // have its own date, this is just "the list as it stands today."
 
 export function buildVepariListRows(veparis) {
-  return veparis.map((vepari) => ({
-    Name: vepari.name,
-    Village: vepari.village,
-    'Custom tolai (per kg)': vepari.customRates?.tolai ?? '',
-    'Custom shes %': vepari.customRates?.shes ?? '',
-    'Custom commission %': vepari.customRates?.commission ?? '',
-  }))
+  return veparis.map((vepari) => {
+    const rates = vepari.customRates || null
+    return {
+      Name: vepari.name,
+      Village: vepari.village,
+      'Custom tolai (per kg)': rates?.tolaiPerKg ?? rates?.tolai ?? '',
+      'Custom shes %': rates?.shesPercent ?? rates?.shes ?? '',
+      'Custom commission %': rates?.commissionPercent ?? rates?.commission ?? '',
+    }
+  })
 }

@@ -106,11 +106,36 @@ export const DEFAULT_RATES = {
 }
 
 // Rate resolution order, exactly as rules.md §3 states it: vepari
-// override, then business default (Phase 8), then this hardcoded
-// fallback until Phase 8 exists. No component should read
-// vepari.customRates directly — always go through this function.
+// override, then business default, then hardcoded DEFAULT_RATES.
+// No component should read vepari.customRates directly — always go
+// through this function.
+//
+// Normalizes legacy short keys ({ tolai, shes, commission }) that an
+// earlier VepariForm wrote, so custom-rate veparis never produce NaN
+// in dakhla math which expects tolaiPerKg / shesPercent / commissionPercent.
+export function normalizeRates(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const tolaiPerKg = Number(
+    raw.tolaiPerKg != null ? raw.tolaiPerKg : raw.tolai,
+  )
+  const shesPercent = Number(
+    raw.shesPercent != null ? raw.shesPercent : raw.shes,
+  )
+  const commissionPercent = Number(
+    raw.commissionPercent != null ? raw.commissionPercent : raw.commission,
+  )
+  if ([tolaiPerKg, shesPercent, commissionPercent].some((n) => Number.isNaN(n))) {
+    return null
+  }
+  return { tolaiPerKg, shesPercent, commissionPercent }
+}
+
 export function resolveRates(vepari, business) {
-  return vepari?.customRates ?? business?.defaultRates ?? DEFAULT_RATES
+  return (
+    normalizeRates(vepari?.customRates) ||
+    normalizeRates(business?.defaultRates) ||
+    DEFAULT_RATES
+  )
 }
 
 // A single bill's vepari-dakhla line — tolai/shes/commission/total,

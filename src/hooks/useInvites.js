@@ -8,7 +8,7 @@
 // hook is purely the owner's side of managing the invite list.
 
 import { useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { onSnapshot, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { inviteCollectionRef, inviteDocRef } from '../firebase/firestore'
 
 export function useInvites() {
