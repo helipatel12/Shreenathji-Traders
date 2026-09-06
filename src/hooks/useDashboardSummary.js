@@ -32,8 +32,9 @@ function daysAgoKey(n) {
 
 function monthsAgoKey(months) {
   const end = todayKeyIST()
-  const [y, m, d] = end.split('-').map(Number)
-  const startDate = new Date(Date.UTC(y, m - 1 - months, d))
+  const [y, m] = end.split('-').map(Number)
+  // Anchor to day 1 so end-of-month overflow (Mar 31 − 1 month → Mar 3) never happens.
+  const startDate = new Date(Date.UTC(y, m - 1 - months, 1))
   return startDate.toISOString().slice(0, 10)
 }
 
@@ -147,7 +148,9 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
     const to = fromDate && toDate && fromDate > toDate ? fromDate : toDate || today
 
     const activeBills = excludeVoided(bills)
-    const activePayments = excludeVoided(payments)
+    const activePayments = excludeVoided(payments).filter((p) =>
+      activeBills.some((b) => b.firestoreId === p.billId),
+    )
     const billsToday = activeBills.filter((b) => b.date === today)
 
     const pendingBills = activeBills
@@ -163,13 +166,11 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
         side: 'jama',
         amount: bill.totalAmount,
       })),
-      ...activePayments
-        .filter((p) => activeBills.some((b) => b.firestoreId === p.billId))
-        .map((payment) => ({
-          date: payment.date,
-          side: 'udhar',
-          amount: payment.amount,
-        })),
+      ...activePayments.map((payment) => ({
+        date: payment.date,
+        side: 'udhar',
+        amount: payment.amount,
+      })),
       ...silakEntries.filter((e) => e.isManual),
     ]
 

@@ -15,9 +15,13 @@ import QueueMonitorScreen from './features/admin/QueueMonitorScreen'
 import ReportsScreen from './features/reports/ReportsScreen'
 import { SkeletonPage } from './components/Skeleton'
 
-function UnauthorizedScreen() {
+function UnauthorizedScreen({ reason = 'unauthorized' }) {
   const { logout } = useAuth()
   const { t } = useLocale()
+  const title =
+    reason === 'unverified' ? t('auth.unverifiedTitle') : t('auth.unauthorizedTitle')
+  const body =
+    reason === 'unverified' ? t('auth.unverifiedBody') : t('auth.unauthorizedBody')
   return (
     <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
       <div className="absolute top-4 right-4">
@@ -25,9 +29,9 @@ function UnauthorizedScreen() {
       </div>
       <div className="w-full max-w-sm card px-6 py-8 text-center">
         <p className="text-caption text-danger font-semibold uppercase tracking-wide mb-2">
-          {t('auth.unauthorizedTitle')}
+          {title}
         </p>
-        <p className="text-body text-ink">{t('auth.unauthorizedBody')}</p>
+        <p className="text-body text-ink">{body}</p>
         <button
           type="button"
           onClick={logout}
@@ -95,7 +99,8 @@ function App() {
   const { status } = useAuth()
 
   if (status === 'loading') return <LoadingScreen />
-  if (status === 'unauthorized') return <UnauthorizedScreen />
+  if (status === 'unauthorized') return <UnauthorizedScreen reason="unauthorized" />
+  if (status === 'unverified') return <UnauthorizedScreen reason="unverified" />
   if (status === 'error') return <AuthErrorScreen />
 
   if (status === 'signed-in') {

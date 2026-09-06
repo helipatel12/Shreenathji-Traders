@@ -6,8 +6,8 @@ import { useVeparis } from '../../hooks/useVeparis'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
 import { excludeVoided } from '../../utils/calc'
-import { todayKeyIST } from '../../utils/dates'
-import { findVepari, vepariDisplayName } from '../../utils/vepari'
+import { todayKeyIST, orderedDateRange } from '../../utils/dates'
+import { findVepari, vepariDisplayName, vepariStableId } from '../../utils/vepari'
 import BillForm, { billToFormValues } from './BillForm'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
@@ -105,11 +105,21 @@ export default function BillsScreen() {
     typeof mode === 'object' && mode.edit != null ? bills.find((b) => b.id === mode.edit) : null
 
   const filteredBills = useMemo(() => {
+    const { fromDate: from, toDate: to } = orderedDateRange(fromDate, toDate)
     const q = search.trim().toLowerCase()
     const list = excludeVoided(bills).filter((bill) => {
-      if (fromDate && bill.date < fromDate) return false
-      if (toDate && bill.date > toDate) return false
-      if (vepariFilter && String(bill.vepariId) !== String(vepariFilter)) return false
+      if (from && bill.date < from) return false
+      if (to && bill.date > to) return false
+      if (vepariFilter) {
+        const matched = findVepari(veparis, bill.vepariId)
+        const billKey = matched ? vepariStableId(matched) : String(bill.vepariId)
+        if (
+          billKey !== String(vepariFilter) &&
+          String(bill.vepariId) !== String(vepariFilter)
+        ) {
+          return false
+        }
+      }
       if (!q) return true
       const vepariName = vepariDisplayName(veparis, bill.vepariId).toLowerCase()
       return (
@@ -177,14 +187,19 @@ export default function BillsScreen() {
     return `bills_${range}`
   }
 
-  function exportSingleBill(bill, format) {
+  async function exportSingleBill(bill, format) {
     const name = vepariDisplayName(veparis, bill.vepariId)
     const filename = `bill_${bill.entryNumber}_${bill.farmerName.replace(/\s+/g, '_')}`
     const title = `${t('bills.entryNumberLabel')} ${bill.entryNumber} — ${bill.farmerName} (${name})`
-    if (format === 'excel') exportRowsToExcel(buildSingleBillRows(bill, name), filename, 'Bill')
-    if (format === 'csv') exportRowsToCSV(buildSingleBillRows(bill, name), filename)
+    if (format === 'excel') await exportRowsToExcel(buildSingleBillRows(bill, name), filename, 'Bill')
+    if (format === 'csv') await exportRowsToCSV(buildSingleBillRows(bill, name), filename)
     if (format === 'pdf') {
-      exportRowsToPDF(buildSingleBillRows(bill, name), buildSingleBillPdfColumns(), filename, title)
+      await exportRowsToPDF(
+        buildSingleBillRows(bill, name),
+        buildSingleBillPdfColumns(),
+        filename,
+        title,
+      )
     }
   }
 
@@ -197,12 +212,12 @@ export default function BillsScreen() {
     })
   }
 
-  function exportList(format) {
+  async function exportList(format) {
     const filename = exportListFilename()
     const rows = buildBillListRows(filteredBills, veparis)
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Bills')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildBillListPdfColumns(), filename, 'Bills')
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Bills')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildBillListPdfColumns(), filename, 'Bills')
   }
 
   function printList() {

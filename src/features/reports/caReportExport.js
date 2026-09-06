@@ -105,12 +105,24 @@ export async function exportCaReportWorkbook({
   toDate,
   filename,
 }) {
-  const XLSX = await import('xlsx')
-  const workbook = XLSX.utils.book_new()
+  const ExcelJS = (await import('exceljs')).default
+  const workbook = new ExcelJS.Workbook()
+
+  function sanitize(value) {
+    if (value == null) return ''
+    if (typeof value === 'number' || typeof value === 'boolean') return value
+    const s = String(value)
+    return /^[=+\-@]/.test(s) ? `'${s}` : s
+  }
 
   function addSheet(rows, name) {
-    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Note: '—' }])
-    XLSX.utils.book_append_sheet(workbook, ws, name.slice(0, 31))
+    const worksheet = workbook.addWorksheet(name.slice(0, 31))
+    const data = rows.length ? rows : [{ Note: '—' }]
+    const keys = Object.keys(data[0])
+    worksheet.addRow(keys)
+    for (const row of data) {
+      worksheet.addRow(keys.map((k) => sanitize(row[k])))
+    }
   }
 
   addSheet(buildCaSummaryRows(summary, fromDate, toDate), 'Summary')
@@ -118,8 +130,8 @@ export async function exportCaReportWorkbook({
   addSheet(buildCaVepariRows(vepariRows), 'Vepari')
   addSheet(buildCaOutstandingRows(outstanding), 'Outstanding')
 
-  const arrayBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
-  const blob = new Blob([arrayBuffer], {
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
   const url = URL.createObjectURL(blob)

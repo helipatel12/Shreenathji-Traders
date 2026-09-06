@@ -4,9 +4,10 @@ import { db as localDb } from '../db/localDb'
 import { paymentCollectionRef, paymentDocRef } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
 import {
-  upsertByFirestoreId,
-  removeMissingSynced,
+  applyCollectionSnapshot,
   dedupeTableByFirestoreId,
+  markSyncedIfUnchanged,
+  nextSyncRevision,
 } from '../utils/syncHelpers'
 import { parseLocaleNumber } from '../utils/numbers'
 
@@ -28,20 +29,12 @@ export function usePayments() {
 
   useEffect(() => {
     let cancelled = false
+    let generation = 0
     const unsubscribe = onSnapshot(paymentCollectionRef(), async (snapshot) => {
-      for (const docSnap of snapshot.docs) {
-        if (cancelled) return
-        await upsertByFirestoreId(localDb.payments, docSnap.id, {
-          firestoreId: docSnap.id,
-          ...docSnap.data(),
-        })
-      }
-      if (cancelled) return
-      await removeMissingSynced(
-        localDb.payments,
-        new Set(snapshot.docs.map((d) => d.id)),
-      )
-      await refreshLocal()
+      const gen = ++generation
+      const isCurrent = () => !cancelled && gen === generation
+      await applyCollectionSnapshot(localDb.payments, snapshot, { isCurrent })
+      if (isCurrent()) await refreshLocal()
     })
     return () => {
       cancelled = true
@@ -63,11 +56,12 @@ export function usePayments() {
       ...payload,
       firestoreId: ref.id,
       syncStatus: 'pending',
+      syncRevision: 1,
     })
     await refreshLocal()
     try {
       await setDoc(ref, { ...payload, createdAt: serverTimestamp() })
-      await localDb.payments.update(localId, { syncStatus: 'synced' })
+      await markSyncedIfUnchanged(localDb.payments, localId, 1)
     } catch (err) {
       console.error('Payment save queued locally — Firestore sync failed:', err)
     }
@@ -83,16 +77,18 @@ export function usePayments() {
     const newValues = { ...existing, ...normalized }
     const newHistoryEntries = diffFields(existing, newValues, EDITABLE_FIELDS, editedBy)
     const editHistory = [...(existing.editHistory || []), ...newHistoryEntries]
+    const syncRevision = nextSyncRevision(existing)
     const localUpdate = { ...normalized, editHistory }
     await localDb.payments.update(localId, {
       ...localUpdate,
+      syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
     })
     await refreshLocal()
     if (existing.firestoreId) {
       try {
         await updateDoc(paymentDocRef(existing.firestoreId), localUpdate)
-        await localDb.payments.update(localId, { syncStatus: 'synced' })
+        await markSyncedIfUnchanged(localDb.payments, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
         console.error('Payment edit queued locally — Firestore sync failed:', err)
@@ -111,6 +107,7 @@ export function usePayments() {
       editedBy: voidedBy,
       editedAt: voidedAt,
     }
+    const syncRevision = nextSyncRevision(existing)
     const changes = {
       isVoided: true,
       voidReason: reason || '',
@@ -120,13 +117,14 @@ export function usePayments() {
     }
     await localDb.payments.update(localId, {
       ...changes,
+      syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
     })
     await refreshLocal()
     if (existing.firestoreId) {
       try {
         await updateDoc(paymentDocRef(existing.firestoreId), changes)
-        await localDb.payments.update(localId, { syncStatus: 'synced' })
+        await markSyncedIfUnchanged(localDb.payments, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
         console.error('Payment void queued locally — Firestore sync failed:', err)

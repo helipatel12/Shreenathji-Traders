@@ -12,7 +12,7 @@ import { useBills } from '../../hooks/useBills'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useVepariDakhla, useAllVepariDakhlaSummary } from '../../hooks/useVepariDakhla'
 import { useLocale } from '../../context/LocaleContext'
-import { todayKeyIST, formatDisplayDate } from '../../utils/dates'
+import { todayKeyIST, formatDisplayDate, orderedDateRange } from '../../utils/dates'
 import { vepariStableId } from '../../utils/vepari'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import BillForm, { billToFormValues } from '../bills/BillForm'
@@ -45,7 +45,7 @@ function SingleVepariLedger() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState('entryNumber')
   const [sortDir, setSortDir] = useState('asc')
-  const { vepari, lines, totals, loading } = useVepariDakhla(vepariId)
+  const { vepari, lines, loading } = useVepariDakhla(vepariId)
 
   const editingLine = lines.find((l) => l.bill.id === editingLocalId)
 
@@ -80,6 +80,29 @@ function SingleVepariLedger() {
     })
   }, [lines, search, sortKey, sortDir, vepari])
 
+  const visibleTotals = useMemo(
+    () =>
+      visibleLines.reduce(
+        (acc, line) => ({
+          weightKg: (acc.weightKg || 0) + (line.weightKg || 0),
+          tolai: (acc.tolai || 0) + (line.tolai || 0),
+          shes: (acc.shes || 0) + (line.shes || 0),
+          commission: (acc.commission || 0) + (line.commission || 0),
+          goodsAmount: (acc.goodsAmount || 0) + (line.goodsAmount || 0),
+          total: (acc.total || 0) + (line.total || 0),
+        }),
+        {
+          weightKg: 0,
+          tolai: 0,
+          shes: 0,
+          commission: 0,
+          goodsAmount: 0,
+          total: 0,
+        },
+      ),
+    [visibleLines],
+  )
+
   function setNoteSort(value) {
     setSortKey('entryNumber')
     setSortDir(value || 'asc')
@@ -95,17 +118,20 @@ function SingleVepariLedger() {
     setEditingLocalId(null)
   }
 
-  function doExport(format) {
-    const rows = buildVepariLedgerRows(lines)
+  async function doExport(format) {
+    const rows = buildVepariLedgerRows(visibleLines)
     const filename = `dakhla_${vepari?.name?.replace(/\s+/g, '_') || 'vepari'}`
     const title = `${vepari?.name} — Vepari Dakhla`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Dakhla')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildVepariLedgerPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Dakhla')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildVepariLedgerPdfColumns(), filename, title)
   }
 
   function handlePrint() {
-    printDakhla(vepari, lines, totals.total, { business, totals })
+    printDakhla(vepari, visibleLines, visibleTotals.total, {
+      business,
+      totals: visibleTotals,
+    })
   }
 
   function exportOne(line, format) {
@@ -305,13 +331,13 @@ function SingleVepariLedger() {
                 <td className="px-4 py-3" colSpan={3}>
                   {t('dakhla.totalLabel')}
                 </td>
-                <td className="px-4 py-3 text-right">{formatDigits(totals.weightKg)}</td>
+                <td className="px-4 py-3 text-right">{formatDigits(visibleTotals.weightKg)}</td>
                 <td className="px-4 py-3 text-right">—</td>
-                <td className="px-4 py-3 text-right">{formatCurrency(totals.goodsAmount)}</td>
-                <td className="px-4 py-3 text-right">{formatCurrency(totals.tolai)}</td>
-                <td className="px-4 py-3 text-right">{formatCurrency(totals.shes)}</td>
-                <td className="px-4 py-3 text-right">{formatCurrency(totals.commission)}</td>
-                <td className="px-4 py-3 text-right">{formatCurrency(totals.total)}</td>
+                <td className="px-4 py-3 text-right">{formatCurrency(visibleTotals.goodsAmount)}</td>
+                <td className="px-4 py-3 text-right">{formatCurrency(visibleTotals.tolai)}</td>
+                <td className="px-4 py-3 text-right">{formatCurrency(visibleTotals.shes)}</td>
+                <td className="px-4 py-3 text-right">{formatCurrency(visibleTotals.commission)}</td>
+                <td className="px-4 py-3 text-right">{formatCurrency(visibleTotals.total)}</td>
                 <td />
               </tr>
             ) : null
@@ -328,7 +354,8 @@ function AllVepariSummary() {
   const [toDate, setToDate] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const [search, setSearch] = useState('')
-  const { rows, loading } = useAllVepariDakhlaSummary(fromDate, toDate)
+  const range = orderedDateRange(fromDate, toDate)
+  const { rows, loading } = useAllVepariDakhlaSummary(range.fromDate, range.toDate)
 
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -339,14 +366,16 @@ function AllVepariSummary() {
     })
   }, [rows, search])
 
-  function doExport(format) {
+  async function doExport(format) {
     const exportRows = buildAllVepariSummaryRows(visibleRows)
-    const range = fromDate || toDate ? `${fromDate || 'start'}_to_${toDate || todayKeyIST()}` : 'all'
-    const filename = `dakhla_summary_${range}`
+    const rangeLabel =
+      fromDate || toDate ? `${fromDate || 'start'}_to_${toDate || todayKeyIST()}` : 'all'
+    const filename = `dakhla_summary_${rangeLabel}`
     const title = 'Vepari Dakhla — All veparis'
-    if (format === 'excel') exportRowsToExcel(exportRows, filename, 'Dakhla Summary')
-    if (format === 'csv') exportRowsToCSV(exportRows, filename)
-    if (format === 'pdf') exportRowsToPDF(exportRows, buildAllVepariSummaryPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(exportRows, filename, 'Dakhla Summary')
+    if (format === 'csv') await exportRowsToCSV(exportRows, filename)
+    if (format === 'pdf')
+      await exportRowsToPDF(exportRows, buildAllVepariSummaryPdfColumns(), filename, title)
   }
 
   function handlePrint() {

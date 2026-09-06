@@ -22,7 +22,7 @@ const inputClasses =
   'text-body text-ink bg-surface border border-border rounded-xl w-full py-3 px-3 outline-none min-h-12 focus:border-accent focus:ring-2 focus:ring-accent-soft'
 
 function emptyLine() {
-  return { type: '', customType: '', weightKg: '', ratePer20kg: '' }
+  return { id: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type: '', customType: '', weightKg: '', ratePer20kg: '' }
 }
 
 export function billToFormValues(bill) {
@@ -33,6 +33,7 @@ export function billToFormValues(bill) {
     vepariId: bill.vepariId,
     date: bill.date,
     items: bill.items.map((item) => ({
+      id: item.id,
       type: GOODS_VALUES.includes(item.type) ? item.type : CUSTOM,
       customType: GOODS_VALUES.includes(item.type) ? '' : item.type,
       weightKg: item.weightKg,
@@ -64,6 +65,7 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
           .array(
             z
               .object({
+                id: z.string().optional(),
                 type: z.string().min(1, t('bills.required')),
                 customType: z.string().optional(),
                 weightKg: z.preprocess(
@@ -116,7 +118,11 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
     }
   }, [initialValues, reset, veparis])
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' })
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: 'items',
+    keyName: 'fieldKey',
+  })
   const watchedItems = watch('items')
   const watchedVepariId = watch('vepariId')
   const selectedVepari = findVepari(veparis, watchedVepariId)
@@ -139,7 +145,7 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
       const rawType =
         item.type === CUSTOM ? String(item.customType || '').trim() : String(item.type || '').trim()
       return {
-        id: initialValues?.items?.[index]?.id ?? `${Date.now()}-${index}`,
+        id: item.id || `${Date.now()}-${index}`,
         type: rawType,
         weightKg,
         ratePer20kg,
@@ -267,7 +273,7 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
                   )
                 : 0
               return (
-                <div key={field.id} className="rounded-2xl border border-border bg-surface px-4 py-4">
+                <div key={field.fieldKey} className="rounded-2xl border border-border bg-surface px-4 py-4">
                   <div className="grid gap-3 sm:grid-cols-[1.3fr_1fr_1fr_1fr_auto] items-start">
                     <div>
                       <label className="block text-caption text-ink-muted mb-1.5">

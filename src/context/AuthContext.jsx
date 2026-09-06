@@ -1,5 +1,5 @@
 // Auth/role context. status:
-//   loading | signed-out | unauthorized | error | signed-in
+//   loading | signed-out | unauthorized | unverified | error | signed-in
 
 import { createContext, useEffect, useState, useCallback } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
@@ -44,11 +44,14 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => {
+    let requestId = 0
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      const myRequest = ++requestId
       setFirebaseUser(fbUser)
       setError(null)
 
       if (!fbUser) {
+        if (myRequest !== requestId) return
         setUserRecord(null)
         setStatus('signed-out')
         return
@@ -69,8 +72,13 @@ export function AuthProvider({ children }) {
           email: fbUser.email || '',
           phone: fbUser.phoneNumber || '',
           name: pendingName || fbUser.displayName || '',
+          emailVerified: Boolean(fbUser.emailVerified),
         })
-        if (result.status === 'unauthorized') {
+        if (myRequest !== requestId) return
+        if (result.status === 'unverified') {
+          setUserRecord(null)
+          setStatus('unverified')
+        } else if (result.status === 'unauthorized') {
           setUserRecord(null)
           setStatus('unauthorized')
         } else {
@@ -78,6 +86,7 @@ export function AuthProvider({ children }) {
           setStatus('signed-in')
         }
       } catch (err) {
+        if (myRequest !== requestId) return
         console.error('Failed to load user record:', err)
         setError(err)
         setUserRecord(null)
@@ -89,7 +98,10 @@ export function AuthProvider({ children }) {
         }
       }
     })
-    return unsubscribe
+    return () => {
+      requestId += 1
+      unsubscribe()
+    }
   }, [])
 
   const logout = useCallback(async () => {

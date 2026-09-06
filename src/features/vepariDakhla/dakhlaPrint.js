@@ -529,7 +529,10 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace, logo
 
 export function printDakhla(vepari, lines, grandTotal, { business, totals }) {
   const printWindow = window.open('', '_blank')
-  if (!printWindow) return
+  if (!printWindow) {
+    window.alert('Pop-up blocked — allow pop-ups for this site to print the dakhla.')
+    return
+  }
 
   printWindow.document.write(
     '<!doctype html><title>...</title><body style="font-family:sans-serif;padding:24px;">Preparing print…</body>',

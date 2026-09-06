@@ -1,14 +1,102 @@
-// Push/pull sync between the local Dexie store (src/db/localDb.js) and
-// Firestore, plus conflict handling for append-only bills/payments
-// (architecture.md §2 "Offline behavior", §5, §7).
-//
-// Implemented per feature hook rather than as one central engine:
-//   useVeparis.js / useBills.js / usePayments.js / useSilakEntries.js
-// each do Dexie-first writes, then background Firestore setDoc/updateDoc,
-// with live onSnapshot merge via syncHelpers.js (up-front firestoreId
-// to avoid duplicate rows). That proved the offline-first bet by Phase 4
-// and was reused through Phases 5–9 — see memory.md.
-//
-// This file remains as the architecture.md §3 folder placeholder so the
-// documented layout stays intact; do not add a second sync path here
-// without consolidating the hooks first.
+// Central offline flush — retries Dexie rows with syncStatus pending /
+// pendingDelete when the browser is online. Feature hooks still do
+// Dexie-first writes; this file drains the queue after failures.
+
+import { setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { db as localDb } from '../db/localDb'
+import {
+  billDocRef,
+  paymentDocRef,
+  vepariDocRef,
+  silakEntryDocRef,
+} from '../firebase/firestore'
+import { markSyncedIfUnchanged } from '../utils/syncHelpers'
+
+let flushing = false
+let flushAgain = false
+let started = false
+
+function stripLocalOnly(row) {
+  const { id, firestoreId, syncStatus, syncRevision, createdAt, ...payload } = row
+  return {
+    payload,
+    createdAtLocal: row.createdAtLocal,
+    editHistory: row.editHistory,
+  }
+}
+
+async function flushTable(table, docRefFor, { allowDelete = false } = {}) {
+  const pending = await table.where('syncStatus').anyOf(['pending', 'pendingDelete']).toArray()
+  for (const row of pending) {
+    if (!row.firestoreId) continue
+    const ref = docRefFor(row.firestoreId)
+    try {
+      if (row.syncStatus === 'pendingDelete') {
+        if (!allowDelete) continue
+        await deleteDoc(ref)
+        // Leave tombstone; removeMissingSynced clears it when remote is gone.
+        continue
+      }
+      const flushedRevision = Number(row.syncRevision) || 0
+      const { payload, createdAtLocal, editHistory } = stripLocalOnly(row)
+      const data = { ...payload }
+      if (editHistory) data.editHistory = editHistory
+      delete data.createdAt
+
+      try {
+        await updateDoc(ref, data)
+      } catch (err) {
+        if (err?.code === 'not-found' || /not.?found|No document/i.test(String(err?.message || ''))) {
+          await setDoc(ref, {
+            ...data,
+            createdAt: serverTimestamp(),
+            ...(createdAtLocal ? { createdAtLocal } : {}),
+          })
+        } else {
+          throw err
+        }
+      }
+      await markSyncedIfUnchanged(table, row.id, flushedRevision)
+    } catch (err) {
+      console.error('Offline flush failed for', table.name, row.firestoreId, err)
+    }
+  }
+}
+
+export async function flushPendingWrites() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { skipped: 'offline' }
+  }
+  if (flushing) {
+    flushAgain = true
+    return { skipped: 'busy' }
+  }
+  flushing = true
+  try {
+    do {
+      flushAgain = false
+      await flushTable(localDb.bills, billDocRef)
+      await flushTable(localDb.payments, paymentDocRef)
+      await flushTable(localDb.veparis, vepariDocRef, { allowDelete: true })
+      await flushTable(localDb.silakEntries, silakEntryDocRef, { allowDelete: true })
+    } while (flushAgain)
+    return { ok: true }
+  } finally {
+    flushing = false
+  }
+}
+
+/** Call once from the signed-in app shell. */
+export function startOfflineFlushListeners() {
+  if (started || typeof window === 'undefined') return () => {}
+  started = true
+  const onOnline = () => {
+    flushPendingWrites()
+  }
+  window.addEventListener('online', onOnline)
+  flushPendingWrites()
+  return () => {
+    window.removeEventListener('online', onOnline)
+    started = false
+  }
+}

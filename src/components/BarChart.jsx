@@ -22,7 +22,10 @@ export default function BarChart({
   const padT = 14
   const padB = series.length >= 10 ? 36 : 48
   const hasSecondary = series.some((p) => p.value2 != null)
-  const values = series.flatMap((p) => [p.value || 0, hasSecondary ? p.value2 || 0 : 0])
+  const values = series.flatMap((p) => [
+    Math.abs(p.value || 0),
+    hasSecondary ? Math.abs(p.value2 || 0) : 0,
+  ])
   const max = Math.max(...values, 1)
   const slot = (width - padL - padR) / series.length
   const barW = Math.min(hasSecondary ? slot * 0.34 : slot * 0.58, 36)
@@ -43,8 +46,7 @@ export default function BarChart({
     }
   }
 
-  const showAllLabels = series.length <= labelCount
-  const labelFontSize = series.length >= 12 ? 10 : series.length > 14 ? 10 : 11
+  const labelFontSize = series.length >= 12 ? 10 : 11
 
   return (
     <div className="w-full overflow-hidden">
@@ -67,9 +69,12 @@ export default function BarChart({
           const cx = padL + i * slot + slot / 2
           const v1 = p.value || 0
           const v2 = hasSecondary ? p.value2 || 0 : 0
-          const draw1 = v1 > 0
-          const draw2 = v2 > 0
+          // Draw zero-height skip; allow negative values for profit/loss chart.
+          const draw1 = v1 !== 0
+          const draw2 = v2 !== 0
           const both = draw1 && draw2
+          const chartH = height - padT - padB
+          const zeroY = height - padB
           // One bar → center on the tick; both → pair centered on the tick.
           const groupW = barW * 2 + gap
           let x1
@@ -77,18 +82,16 @@ export default function BarChart({
           if (both) {
             x1 = cx - groupW / 2
             x2 = cx - groupW / 2 + barW + gap
-          } else if (draw1) {
-            x1 = cx - barW / 2
-            x2 = cx - barW / 2
           } else {
             x1 = cx - barW / 2
             x2 = cx - barW / 2
           }
-          const h1 = (v1 / max) * (height - padT - padB)
-          const h2 = (v2 / max) * (height - padT - padB)
-          const y1 = height - padB - h1
-          const y2 = height - padB - h2
+          const h1 = (Math.abs(v1) / max) * chartH
+          const h2 = (Math.abs(v2) / max) * chartH
+          const y1 = zeroY - h1
+          const y2 = zeroY - h2
           const showLabel = labelIdx.has(i)
+          const fill1 = p.color || (v1 < 0 ? 'var(--color-danger, #b91c1c)' : barColor)
           return (
             <g key={i}>
               <title>
@@ -103,7 +106,7 @@ export default function BarChart({
                   width={Math.max(barW, 2)}
                   height={Math.max(h1, 0)}
                   rx="3"
-                  fill={barColor}
+                  fill={fill1}
                 />
               )}
               {draw2 && (
@@ -141,16 +144,6 @@ export default function BarChart({
           )
         })}
       </svg>
-      {!showAllLabels && (
-        <div className="flex justify-between px-1 -mt-1">
-          <span className="text-[11px] font-semibold text-ink-muted font-numeric">
-            {series[0]?.label}
-          </span>
-          <span className="text-[11px] font-semibold text-ink-muted font-numeric">
-            {series[series.length - 1]?.label}
-          </span>
-        </div>
-      )}
       {formatValue && series.length > 0 && (
         <p className="sr-only">
           {series.map((p) => `${p.label}: ${formatValue(p.value)}`).join(', ')}

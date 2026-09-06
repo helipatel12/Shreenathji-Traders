@@ -33,20 +33,24 @@ import { printBill } from '../bills/billPrint'
 import { buildRojmerRows, buildRojmerPdfColumns } from './rojmerExport'
 
 function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoidPayment }) {
-  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
-  const billPayments = payments.filter(
-    (p) => p.billId === bill.firestoreId && !p.isVoided,
-  )
+  const { t, formatCurrency, formatDate } = useLocale()
+  const billPayments = payments.filter((p) => p.billId === bill.firestoreId)
   if (billPayments.length === 0) {
     return <p className="text-caption text-ink-muted">—</p>
   }
   return (
     <ul className="space-y-1.5">
       {billPayments.map((payment) => (
-        <li key={payment.id} className="flex items-center justify-between text-caption gap-2">
-          <span className="text-ink">
+        <li
+          key={payment.id}
+          className={`flex items-center justify-between text-caption gap-2 ${
+            payment.isVoided ? 'opacity-60' : ''
+          }`}
+        >
+          <span className={`text-ink ${payment.isVoided ? 'line-through' : ''}`}>
             {formatCurrency(payment.amount)} · {t(`rojmer.${payment.type}`)} ·{' '}
             {formatDate(payment.date)}
+            {payment.isVoided ? ` · ${t('common.voided')}` : ''}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
             )}
@@ -54,7 +58,7 @@ function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoid
               <span className="text-ink-muted"> · {t('common.edited')}</span>
             )}
           </span>
-          {(canWrite || isOwner) && (
+          {!payment.isVoided && (canWrite || isOwner) && (
             <span className="flex items-center gap-0.5 shrink-0">
               {canWrite && (
                 <button
@@ -241,13 +245,13 @@ export default function RojmerScreen() {
     setVoidingPayment(null)
   }
 
-  function doExport(format) {
+  async function doExport(format) {
     const exportRows = buildRojmerRows(filteredRows, veparis, payments)
     const filename = `rojmer_${tab}`
     const title = `Rojmer — ${tab}`
-    if (format === 'excel') exportRowsToExcel(exportRows, filename, 'Rojmer')
-    if (format === 'csv') exportRowsToCSV(exportRows, filename)
-    if (format === 'pdf') exportRowsToPDF(exportRows, buildRojmerPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(exportRows, filename, 'Rojmer')
+    if (format === 'csv') await exportRowsToCSV(exportRows, filename)
+    if (format === 'pdf') await exportRowsToPDF(exportRows, buildRojmerPdfColumns(), filename, title)
   }
 
   function handlePrint() {

@@ -328,7 +328,10 @@ function buildHtml({ bill, business, vepariName, vepariVillage, fontFace }) {
 
 export function printBill(bill, { business, vepariName, vepariVillage }) {
   const printWindow = window.open('', '_blank')
-  if (!printWindow) return
+  if (!printWindow) {
+    window.alert('Pop-up blocked — allow pop-ups for this site to print the cash memo.')
+    return
+  }
 
   printWindow.document.write(
     '<!doctype html><title>...</title><body style="font-family:sans-serif;padding:24px;">Preparing print…</body>',

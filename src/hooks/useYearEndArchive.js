@@ -22,6 +22,7 @@ import { buildAllVepariSummaryRows } from '../features/vepariDakhla/dakhlaExport
 import { buildRojmerRows } from '../features/rojmer/rojmerExport'
 import { buildRangeRows as buildSilakRangeRows } from '../features/jansaSilak/silakExport'
 import { buildVepariListRows } from '../features/settings/veparisExport'
+import { db as localDb } from '../db/localDb'
 
 const LOCAL_STORAGE_KEY = 'shreenath-traders:lastSeenFYStart'
 
@@ -31,9 +32,22 @@ function sheetRowsOrPlaceholder(rows, emptyNote) {
 }
 
 export function useYearEndArchiveCheck() {
-  const { bills: allBills } = useBills()
-  const bills = useMemo(() => excludeVoided(allBills), [allBills])
+  const [bills, setBills] = useState([])
   const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const rows = await localDb.bills.toArray()
+      if (!cancelled) setBills(excludeVoided(rows))
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
 
   const today = todayKeyIST()
   const currentFYStart = financialYearBounds(today).start

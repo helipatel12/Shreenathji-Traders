@@ -126,7 +126,7 @@ export async function getUserRecord(uid) {
 // auth) — switched to email since Firebase now requires the Blaze
 // (paid) plan for phone/SMS auth, which conflicts with prd.md §5's
 // free-tier requirement. See memory.md decisions log.
-export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone = '' }) {
+export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone = '', emailVerified = false }) {
   const displayName = String(name || '').trim()
   const normalizedEmail = String(email || '').trim().toLowerCase()
   const existingUser = await getUserRecord(uid)
@@ -136,6 +136,11 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
       return { user: { ...existingUser, name: displayName }, status: 'existing' }
     }
     return { user: existingUser, status: 'existing' }
+  }
+
+  // New membership (owner bootstrap / invite) requires a verified mailbox.
+  if (!emailVerified) {
+    return { user: null, status: 'unverified' }
   }
 
   // Business get is member/invite/bootstrap-only (firestore.rules). A
@@ -159,6 +164,7 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
     batch.set(businessRef(), {
       name: 'Shreenathji Traders',
       financialYearStart: '04-01',
+      createdByUid: uid,
       createdAt: serverTimestamp(),
     })
     const newUser = {
@@ -171,6 +177,20 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
     }
     batch.set(userRef(uid), newUser)
     await batch.commit()
+    return { user: { id: uid, ...newUser }, status: 'created-owner' }
+  }
+
+  // Orphan business (created without user doc) — claim if we stamped createdByUid.
+  if (business?.createdByUid === uid && normalizedEmail) {
+    const newUser = {
+      email: normalizedEmail,
+      phone: phone || '',
+      role: 'owner',
+      name: displayName,
+      location: '',
+      createdAt: serverTimestamp(),
+    }
+    await setDoc(userRef(uid), newUser)
     return { user: { id: uid, ...newUser }, status: 'created-owner' }
   }
 

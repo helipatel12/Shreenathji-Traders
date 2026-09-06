@@ -3,69 +3,81 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { useLocale } from '../../context/LocaleContext'
 import { db as localDb } from '../../db/localDb'
+import { flushPendingWrites } from '../../sync/syncEngine'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import { SkeletonTable } from '../../components/Skeleton'
+
+function isQueued(row) {
+  return row.syncStatus === 'pending' || row.syncStatus === 'pendingDelete'
+}
 
 export default function QueueMonitorScreen() {
   const { isOwner } = useAuth()
   const { t, formatDate } = useLocale()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
+  const [flushing, setFlushing] = useState(false)
+  const [flushMessage, setFlushMessage] = useState('')
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
+
+  async function loadQueue() {
+    const [bills, payments, silak, veparis] = await Promise.all([
+      localDb.bills.toArray(),
+      localDb.payments.toArray(),
+      localDb.silakEntries.toArray(),
+      localDb.veparis.toArray(),
+    ])
+    return [
+      ...bills.filter(isQueued).map((r) => ({
+        key: `bill-${r.id}`,
+        type: 'bill',
+        label: `${t('bills.entryNumberLabel')} ${r.entryNumber ?? '—'} · ${r.farmerName || ''}`,
+        date: r.date,
+        detail:
+          r.syncStatus === 'pendingDelete'
+            ? t('admin.pendingDelete')
+            : r.firestoreId || t('admin.localOnly'),
+      })),
+      ...payments.filter(isQueued).map((r) => ({
+        key: `payment-${r.id}`,
+        type: 'payment',
+        label: `${t('rojmer.amountLabel')} ${r.amount}`,
+        date: r.date,
+        detail:
+          r.syncStatus === 'pendingDelete'
+            ? t('admin.pendingDelete')
+            : r.billId || t('admin.localOnly'),
+      })),
+      ...silak.filter(isQueued).map((r) => ({
+        key: `silak-${r.id}`,
+        type: 'silak',
+        label: r.label || t('nav.silak'),
+        date: r.date,
+        detail: r.syncStatus === 'pendingDelete' ? t('admin.pendingDelete') : r.side,
+      })),
+      ...veparis.filter(isQueued).map((r) => ({
+        key: `vepari-${r.id}`,
+        type: 'vepari',
+        label: r.name,
+        date: '',
+        detail:
+          r.syncStatus === 'pendingDelete'
+            ? t('admin.pendingDelete')
+            : r.village || '',
+      })),
+    ]
+  }
 
   useEffect(() => {
     if (!isOwner) return undefined
     let cancelled = false
 
     async function load() {
-      const [bills, payments, silak, veparis] = await Promise.all([
-        localDb.bills.toArray(),
-        localDb.payments.toArray(),
-        localDb.silakEntries.toArray(),
-        localDb.veparis.toArray(),
-      ])
+      const queue = await loadQueue()
       if (cancelled) return
-      const queue = [
-        ...bills
-          .filter((r) => r.syncStatus === 'pending')
-          .map((r) => ({
-            key: `bill-${r.id}`,
-            type: 'bill',
-            label: `${t('bills.entryNumberLabel')} ${r.entryNumber ?? '—'} · ${r.farmerName || ''}`,
-            date: r.date,
-            detail: r.firestoreId || t('admin.localOnly'),
-          })),
-        ...payments
-          .filter((r) => r.syncStatus === 'pending')
-          .map((r) => ({
-            key: `payment-${r.id}`,
-            type: 'payment',
-            label: `${t('rojmer.amountLabel')} ${r.amount}`,
-            date: r.date,
-            detail: r.billId || t('admin.localOnly'),
-          })),
-        ...silak
-          .filter((r) => r.syncStatus === 'pending')
-          .map((r) => ({
-            key: `silak-${r.id}`,
-            type: 'silak',
-            label: r.label || t('nav.silak'),
-            date: r.date,
-            detail: r.side,
-          })),
-        ...veparis
-          .filter((r) => r.syncStatus === 'pending')
-          .map((r) => ({
-            key: `vepari-${r.id}`,
-            type: 'vepari',
-            label: r.name,
-            date: '',
-            detail: r.village || '',
-          })),
-      ]
       setItems(queue)
       setLoading(false)
     }
@@ -76,7 +88,26 @@ export default function QueueMonitorScreen() {
       cancelled = true
       clearInterval(id)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, isOwner])
+
+  async function handleFlush() {
+    setFlushing(true)
+    setFlushMessage('')
+    try {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setFlushMessage(t('admin.queueOffline'))
+        return
+      }
+      const result = await flushPendingWrites()
+      if (result?.skipped === 'offline') {
+        setFlushMessage(t('admin.queueOffline'))
+      }
+      setItems(await loadQueue())
+    } finally {
+      setFlushing(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -118,19 +149,24 @@ export default function QueueMonitorScreen() {
     {
       key: 'date',
       header: t('bills.dateLabel'),
-      render: (row) => <span className="font-numeric">{row.date ? formatDate(row.date) : '—'}</span>,
+      render: (row) => (row.date ? formatDate(row.date) : '—'),
     },
     {
-      key: 'status',
-      header: t('admin.queueStatus'),
-      render: () => <span className="badge badge-blue">{t('common.syncing')}</span>,
+      key: 'detail',
+      header: t('admin.queueDetail'),
+      render: (row) => <span className="text-ink-muted">{row.detail}</span>,
     },
   ]
 
   return (
     <div>
-      <h1 className="page-title mb-1">{t('admin.queueTitle')}</h1>
-      <p className="text-body text-ink-muted mb-6">{t('admin.queueSubtitle')}</p>
+      <h1 className="page-title">{t('admin.queueTitle')}</h1>
+      <p className="text-body text-ink-muted mt-1 mb-4">{t('admin.queueSubtitle')}</p>
+      {flushMessage ? (
+        <p className="text-caption text-danger mb-3" role="status">
+          {flushMessage}
+        </p>
+      ) : null}
 
       {loading ? (
         <SkeletonTable rows={5} cols={4} />
@@ -147,13 +183,18 @@ export default function QueueMonitorScreen() {
               search={search}
               onSearchChange={setSearch}
               searchPlaceholder={t('admin.searchQueue')}
+              actions={
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={flushing || items.length === 0}
+                  onClick={handleFlush}
+                >
+                  {flushing ? t('common.syncing') : t('admin.retrySync')}
+                </button>
+              }
             />
           }
-          renderExpanded={(row) => (
-            <p className="text-body text-ink-muted">
-              {row.detail}
-            </p>
-          )}
         />
       )}
     </div>

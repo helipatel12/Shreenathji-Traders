@@ -3,10 +3,11 @@ import { doc, onSnapshot, setDoc, deleteDoc, updateDoc, serverTimestamp } from '
 import { db as localDb } from '../db/localDb'
 import { vepariCollectionRef, vepariDocRef } from '../firebase/firestore'
 import {
-  upsertByFirestoreId,
-  removeMissingSynced,
+  applyCollectionSnapshot,
   dedupeTableByFirestoreId,
   dedupeVeparisForDisplay,
+  markSyncedIfUnchanged,
+  nextSyncRevision,
 } from '../utils/syncHelpers'
 
 export function useVeparis() {
@@ -26,20 +27,12 @@ export function useVeparis() {
 
   useEffect(() => {
     let cancelled = false
+    let generation = 0
     const unsubscribe = onSnapshot(vepariCollectionRef(), async (snapshot) => {
-      for (const docSnap of snapshot.docs) {
-        if (cancelled) return
-        await upsertByFirestoreId(localDb.veparis, docSnap.id, {
-          firestoreId: docSnap.id,
-          ...docSnap.data(),
-        })
-      }
-      if (cancelled) return
-      await removeMissingSynced(
-        localDb.veparis,
-        new Set(snapshot.docs.map((d) => d.id)),
-      )
-      await refreshLocal()
+      const gen = ++generation
+      const isCurrent = () => !cancelled && gen === generation
+      await applyCollectionSnapshot(localDb.veparis, snapshot, { isCurrent })
+      if (isCurrent()) await refreshLocal()
     })
     return () => {
       cancelled = true
@@ -52,6 +45,7 @@ export function useVeparis() {
     const trimmedVillage = village.trim()
     const existingSame = (await localDb.veparis.toArray()).find(
       (v) =>
+        v.syncStatus !== 'pendingDelete' &&
         v.name.trim().toLowerCase() === trimmedName.toLowerCase() &&
         (v.village || '').trim().toLowerCase() === trimmedVillage.toLowerCase(),
     )
@@ -71,11 +65,12 @@ export function useVeparis() {
       firestoreId: ref.id,
       createdAtLocal: Date.now(),
       syncStatus: 'pending',
+      syncRevision: 1,
     })
     await refreshLocal()
     try {
       await setDoc(ref, { ...payload, createdAt: serverTimestamp() })
-      await localDb.veparis.update(localId, { syncStatus: 'synced' })
+      await markSyncedIfUnchanged(localDb.veparis, localId, 1)
     } catch (err) {
       console.error('Vepari save queued locally — Firestore sync failed:', err)
     }
@@ -86,6 +81,7 @@ export function useVeparis() {
   async function updateVepari(localId, { name, village, customRates }) {
     const existing = await localDb.veparis.get(localId)
     if (!existing) return
+    const syncRevision = nextSyncRevision(existing)
     const payload = {
       name: name.trim(),
       village: village.trim(),
@@ -93,13 +89,14 @@ export function useVeparis() {
     }
     await localDb.veparis.update(localId, {
       ...payload,
+      syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
     })
     await refreshLocal()
     if (existing.firestoreId) {
       try {
         await updateDoc(vepariDocRef(existing.firestoreId), payload)
-        await localDb.veparis.update(localId, { syncStatus: 'synced' })
+        await markSyncedIfUnchanged(localDb.veparis, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
         console.error('Vepari update queued locally — Firestore sync failed:', err)
@@ -110,19 +107,40 @@ export function useVeparis() {
   async function deleteVepari(localId) {
     const existing = await localDb.veparis.get(localId)
     if (!existing) return
-    await localDb.veparis.delete(localId)
+    if (!existing.firestoreId) {
+      await localDb.veparis.delete(localId)
+      await refreshLocal()
+      return
+    }
+    // Tombstone until removeMissingSynced sees the remote id gone (avoids C1 resurrection).
+    await localDb.veparis.update(localId, { syncStatus: 'pendingDelete' })
     await refreshLocal()
-    if (existing.firestoreId) {
-      try {
-        await deleteDoc(vepariDocRef(existing.firestoreId))
-      } catch (err) {
-        console.error('Vepari delete did not reach Firestore yet:', err)
-      }
+    try {
+      await deleteDoc(vepariDocRef(existing.firestoreId))
+    } catch (err) {
+      console.error('Vepari delete queued locally — Firestore sync failed:', err)
     }
   }
 
-  // Collapse same name+village created on phone and laptop separately.
-  const displayVeparis = useMemo(() => dedupeVeparisForDisplay(veparis, []), [veparis])
+  const [billVepariIds, setBillVepariIds] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    localDb.bills.toArray().then((bills) => {
+      if (!cancelled) setBillVepariIds(bills.map((b) => ({ vepariId: b.vepariId })))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [veparis])
+
+  const displayVeparis = useMemo(
+    () =>
+      dedupeVeparisForDisplay(
+        veparis.filter((v) => v.syncStatus !== 'pendingDelete'),
+        billVepariIds,
+      ),
+    [veparis, billVepariIds],
+  )
 
   return {
     veparis: displayVeparis,

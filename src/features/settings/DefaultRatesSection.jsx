@@ -25,7 +25,11 @@ export default function DefaultRatesSection() {
   const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
-    if (business?.defaultRates) setRates(business.defaultRates)
+    if (business?.defaultRates) {
+      setRates({ ...DEFAULT_RATES, ...business.defaultRates })
+    } else {
+      setRates(DEFAULT_RATES)
+    }
   }, [business])
 
   async function handleSave(e) {
@@ -33,11 +37,22 @@ export default function DefaultRatesSection() {
     setSaving(true)
     setSaveError('')
     try {
+      const tolaiPerKg = parseLocaleNumber(rates.tolaiPerKg)
+      const shesPercent = parseLocaleNumber(rates.shesPercent)
+      const commissionPercent = parseLocaleNumber(rates.commissionPercent)
+      if (
+        ![tolaiPerKg, shesPercent, commissionPercent].every(
+          (n) => Number.isFinite(n) && n >= 0,
+        )
+      ) {
+        setSaveError(t('common.mustBeZeroOrMore'))
+        return
+      }
       await updateBusiness({
         defaultRates: {
-          tolaiPerKg: parseLocaleNumber(rates.tolaiPerKg),
-          shesPercent: parseLocaleNumber(rates.shesPercent),
-          commissionPercent: parseLocaleNumber(rates.commissionPercent),
+          tolaiPerKg,
+          shesPercent,
+          commissionPercent,
         },
       })
       setSaved(true)

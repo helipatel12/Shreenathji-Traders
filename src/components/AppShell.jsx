@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useLocale } from '../context/LocaleContext'
+import { startOfflineFlushListeners } from '../sync/syncEngine'
 import LanguageToggle from './LanguageToggle'
 import ProfileMenu from './ProfileMenu'
 import YearEndArchivePrompt from './YearEndArchivePrompt'
@@ -67,6 +68,8 @@ export default function AppShell() {
       /* ignore */
     }
   }, [collapsed])
+
+  useEffect(() => startOfflineFlushListeners(), [])
 
   const brandPrimary = lang === 'gu' ? t('common.businessNameGu') : t('common.businessNameEn')
 
@@ -241,6 +244,10 @@ export default function AppShell() {
             <span className="text-[0.7rem] leading-none font-medium">{label}</span>
           </NavLink>
         ))}
+        <NavLink to="/reports" className={mobileTabClass}>
+          <FileBarChart2 size={22} strokeWidth={1.75} />
+          <span className="text-[0.7rem] leading-none font-medium">{t('nav.reports')}</span>
+        </NavLink>
         <NavLink to="/settings" className={mobileTabClass}>
           <Settings size={22} strokeWidth={1.75} />
           <span className="text-[0.7rem] leading-none font-medium">{t('nav.settings')}</span>

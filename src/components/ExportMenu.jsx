@@ -22,9 +22,14 @@ export default function ExportMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  function pick(fn) {
-    fn()
+  async function pick(fn) {
     setOpen(false)
+    if (!fn) return
+    try {
+      await fn()
+    } catch (err) {
+      console.error('Export failed:', err)
+    }
   }
 
   return (

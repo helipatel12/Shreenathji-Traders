@@ -7,7 +7,7 @@ import { FileBarChart2 } from 'lucide-react'
 import { useCaReport } from '../../hooks/useCaReport'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
-import { financialYearBounds, todayKeyIST } from '../../utils/dates'
+import { financialYearBounds, todayKeyIST, orderedDateRange } from '../../utils/dates'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import ExportMenu from '../../components/ExportMenu'
@@ -48,12 +48,13 @@ export default function ReportsScreen() {
   const [sortKey, setSortKey] = useState('entryNumber')
   const [sortDir, setSortDir] = useState('asc')
 
+  const range = orderedDateRange(fromDate, toDate)
   const { loading, billRows, vepariRows, outstanding, summary, findVepari } = useCaReport(
-    fromDate,
-    toDate,
+    range.fromDate,
+    range.toDate,
   )
 
-  const rangeLabel = `${fromDate || '…'} → ${toDate || '…'}`
+  const rangeLabel = `${range.fromDate || '…'} → ${range.toDate || '…'}`
 
   const sortedBillRows = useMemo(
     () =>
@@ -93,18 +94,18 @@ export default function ReportsScreen() {
     setToDate(bounds.end)
   }
 
-  function doExport(format) {
-    const filenameBase = `ca_report_${fromDate || 'start'}_${toDate || 'end'}`
+  async function doExport(format) {
+    const filenameBase = `ca_report_${range.fromDate || 'start'}_${range.toDate || 'end'}`
     const title = `${t('reports.title')} — ${rangeLabel}`
 
     if (format === 'full-excel') {
-      exportCaReportWorkbook({
+      await exportCaReportWorkbook({
         summary,
         billRows: sortedBillRows,
         vepariRows,
         outstanding: sortedOutstanding,
-        fromDate,
-        toDate,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
         filename: filenameBase,
       })
       return
@@ -126,14 +127,14 @@ export default function ReportsScreen() {
       cols = buildCaOutstandingPdfColumns()
       name = `${filenameBase}_outstanding`
     } else {
-      rows = buildCaSummaryRows(summary, fromDate, toDate)
+      rows = buildCaSummaryRows(summary, range.fromDate, range.toDate)
       cols = buildCaSummaryPdfColumns()
       name = `${filenameBase}_summary`
     }
 
-    if (format === 'excel') exportRowsToExcel(rows, name, 'CA Report')
-    if (format === 'csv') exportRowsToCSV(rows, name)
-    if (format === 'pdf') exportRowsToPDF(rows, cols, name, title)
+    if (format === 'excel') await exportRowsToExcel(rows, name, 'CA Report')
+    if (format === 'csv') await exportRowsToCSV(rows, name)
+    if (format === 'pdf') await exportRowsToPDF(rows, cols, name, title)
   }
 
   function handlePrint() {
@@ -145,7 +146,11 @@ export default function ReportsScreen() {
     } else if (tab === 'outstanding') {
       printRows(buildCaOutstandingRows(sortedOutstanding), buildCaOutstandingPdfColumns(), title)
     } else {
-      printRows(buildCaSummaryRows(summary, fromDate, toDate), buildCaSummaryPdfColumns(), title)
+      printRows(
+        buildCaSummaryRows(summary, range.fromDate, range.toDate),
+        buildCaSummaryPdfColumns(),
+        title,
+      )
     }
   }
 
@@ -316,7 +321,6 @@ export default function ReportsScreen() {
     {
       key: 'farmer',
       header: t('bills.farmerNameLabel'),
-      filter: dateSortFilter(t, sortKey, sortDir, setDateSort),
       render: (row) => (
         <div>
           <p className="font-semibold">{row.bill.farmerName}</p>

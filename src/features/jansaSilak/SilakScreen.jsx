@@ -8,7 +8,7 @@ import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useJansaSilak, useJansaSilakRange } from '../../hooks/useJansaSilak'
 import { useLocale } from '../../context/LocaleContext'
-import { todayKeyIST, monthBounds, financialYearBounds } from '../../utils/dates'
+import { todayKeyIST, monthBounds, financialYearBounds, orderedDateRange } from '../../utils/dates'
 import ManualEntryForm from './ManualEntryForm'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
@@ -23,6 +23,90 @@ import {
   buildRangeRows,
   buildRangePdfColumns,
 } from './silakExport'
+
+/** Expanded month/year row — lists every line that makes up જમા / ઉધાર. */
+function DayEntriesBreakdown({ day }) {
+  const { t, formatCurrency } = useLocale()
+
+  const entries = day?.entries || []
+  const sortGuAsc = (list) =>
+    list.slice().sort((a, b) =>
+      String(a.label || '').localeCompare(String(b.label || ''), 'gu', { sensitivity: 'base' }),
+    )
+  const jama = sortGuAsc(entries.filter((e) => e.side === 'jama'))
+  const udhar = sortGuAsc(entries.filter((e) => e.side === 'udhar'))
+
+  function SideBlock({ title, lines, total, emptyLabel, tone }) {
+    const amountClass = tone === 'success' ? 'text-success' : 'text-danger'
+    return (
+      <div className="min-w-0">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p className="text-caption font-semibold uppercase tracking-wide text-ink-muted">
+            {title}
+          </p>
+          <p className={`font-numeric text-caption font-semibold ${amountClass}`}>
+            {formatCurrency(total)}
+          </p>
+        </div>
+        {lines.length === 0 ? (
+          <p className="text-caption text-ink-muted">{emptyLabel}</p>
+        ) : (
+          <ul className="divide-y divide-border/70 rounded-xl border border-border bg-surface overflow-hidden">
+            {lines.map((entry) => (
+              <li
+                key={entry.key || `${entry.side}-${entry.label}-${entry.amount}`}
+                className="flex items-start justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-body text-ink font-medium break-words">{entry.label}</p>
+                  {entry.isManual ? (
+                    <span className="badge badge-gray mt-1">{t('silak.manualBadge')}</span>
+                  ) : null}
+                </div>
+                <p className={`shrink-0 font-numeric font-semibold ${amountClass}`}>
+                  {tone === 'success' ? '+' : '−'}
+                  {formatCurrency(entry.amount)}
+                </p>
+              </li>
+            ))}
+            <li className="flex items-center justify-between gap-3 px-3 py-2.5 bg-surface-muted">
+              <p className="text-caption font-semibold text-ink">{t('silak.linesTotal')}</p>
+              <p className={`font-numeric font-semibold ${amountClass}`}>
+                {formatCurrency(total)}
+              </p>
+            </li>
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  if (!entries.length) {
+    return <p className="text-body text-ink-muted">{t('silak.noEntries')}</p>
+  }
+
+  return (
+    <div className="space-y-4 py-1">
+      <p className="text-caption font-semibold text-ink">{t('silak.dayBreakdownTitle')}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SideBlock
+          title={t('silak.jamaBreakdown')}
+          lines={jama}
+          total={day.jamaTotal}
+          emptyLabel={t('silak.noJamaLines')}
+          tone="success"
+        />
+        <SideBlock
+          title={t('silak.udharBreakdown')}
+          lines={udhar}
+          total={day.udharTotal}
+          emptyLabel={t('silak.noUdharLines')}
+          tone="danger"
+        />
+      </div>
+    </div>
+  )
+}
 
 function DayView() {
   const { user, canWrite, isOwner } = useAuth()
@@ -65,14 +149,14 @@ function DayView() {
     setConfirmDeleteId(null)
   }
 
-  function doExport(format) {
+  async function doExport(format) {
     if (!day) return
     const rows = buildDayRows(day)
     const filename = `silak_${date}`
     const title = `Jansa Silak — ${date}`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildDayPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildDayPdfColumns(), filename, title)
   }
 
   function handlePrint() {
@@ -336,7 +420,8 @@ function RangeView({ mode }) {
   const [toDate, setToDate] = useState(bounds.end)
   const [selectedDate, setSelectedDate] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
-  const { loading, days, rangeFees } = useJansaSilakRange(fromDate, toDate)
+  const range = orderedDateRange(fromDate, toDate)
+  const { loading, days, rangeFees } = useJansaSilakRange(range.fromDate, range.toDate)
 
   const sortedDays = useMemo(() => {
     const dir = sortDir === 'desc' ? -1 : 1
@@ -347,13 +432,13 @@ function RangeView({ mode }) {
     })
   }, [days, sortDir])
 
-  function doExport(format) {
+  async function doExport(format) {
     const rows = buildRangeRows(sortedDays)
     const filename = `silak_${mode}_${fromDate}_to_${toDate}`
     const title = `Jansa Silak — ${fromDate} to ${toDate}`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildRangePdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildRangePdfColumns(), filename, title)
   }
 
   function handlePrint() {
@@ -486,13 +571,7 @@ function RangeView({ mode }) {
                 }
               />
             }
-            renderExpanded={(day) => (
-              <p className="text-body text-ink-muted">
-                {formatDate(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
-                {t('silak.udharLabel')} {formatCurrency(day.udharTotal)} ·{' '}
-                {t('silak.closingLabel')} {formatCurrency(day.closingBalance)}
-              </p>
-            )}
+            renderExpanded={(day) => <DayEntriesBreakdown day={day} />}
           />
           {sortedDays.length > 0 && (
             <div className="card px-4 py-3 mt-3 bg-accent-soft space-y-2.5">
@@ -553,7 +632,7 @@ export default function SilakScreen() {
         ))}
       </div>
 
-      {tab === 'day' ? <DayView /> : <RangeView mode={tab} />}
+      {tab === 'day' ? <DayView /> : <RangeView key={tab} mode={tab} />}
     </div>
   )
 }

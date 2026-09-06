@@ -10,10 +10,16 @@ import { SkeletonCard, Skeleton } from '../../components/Skeleton'
 import BarChart from '../../components/BarChart'
 import TrendChart from '../../components/TrendChart'
 
-function greetingKey(date = new Date()) {
-  const h = date.getHours()
-  if (h < 12) return 'dashboard.greetingMorning'
-  if (h < 17) return 'dashboard.greetingAfternoon'
+function greetingKey() {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date()),
+  )
+  if (hour < 12) return 'dashboard.greetingMorning'
+  if (hour < 17) return 'dashboard.greetingAfternoon'
   return 'dashboard.greetingEvening'
 }
 
@@ -58,7 +64,7 @@ function MiniStat({ label, value, tone }) {
 const RANGE_OPTIONS = DASHBOARD_PRESETS
 
 export default function DashboardScreen() {
-  const { user, role, canWrite, isOwner } = useAuth()
+  const { user, role, canWrite, isOwner, isCa } = useAuth()
   const { t, formatCurrency, formatDigits } = useLocale()
   const [chartTab, setChartTab] = useState('income')
   const {
@@ -88,6 +94,12 @@ export default function DashboardScreen() {
     value: chartTab === 'income' ? p.value : p.profit,
     value2: chartTab === 'income' ? p.value2 : undefined,
     tip: p.tip || p.date,
+    color:
+      chartTab === 'profit'
+        ? (p.profit || 0) >= 0
+          ? 'var(--color-success)'
+          : 'var(--color-danger)'
+        : undefined,
   }))
   const profitSeriesLocale = profitSeries.map((p) => ({
     ...p,
@@ -113,7 +125,11 @@ export default function DashboardScreen() {
           {role && (
             <p className="text-caption text-ink-muted mt-0.5">
               {t(`roles.${role}`)}
-              {isOwner ? ` · ${t('nav.adminPanel')}` : ` · ${t('nav.staffPanel')}`}
+              {isOwner
+                ? ` · ${t('nav.adminPanel')}`
+                : isCa
+                  ? ` · ${t('nav.caPanel')}`
+                  : ` · ${t('nav.staffPanel')}`}
             </p>
           )}
         </div>
@@ -292,14 +308,8 @@ export default function DashboardScreen() {
                   maxLabels={maxLabels}
                   emptyLabel={t('dashboard.chartEmpty')}
                   formatValue={formatCurrency}
-                barColor={
-                  chartTab === 'profit'
-                    ? profitTotal >= 0
-                      ? 'var(--color-success)'
-                      : 'var(--color-danger)'
-                    : 'var(--color-accent)'
-                }
-              />
+                  barColor="var(--color-accent)"
+                />
             </div>
           </div>
 

@@ -1,46 +1,66 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { billCollectionRef, billDocRef } from '../firebase/firestore'
+import { billCollectionRef, billDocRef, paymentDocRef } from '../firebase/firestore'
 import { computeBillTotal } from '../utils/calc'
 import { diffFields } from '../utils/editHistory'
 import {
-  upsertByFirestoreId,
-  removeMissingSynced,
+  applyCollectionSnapshot,
   dedupeTableByFirestoreId,
+  markSyncedIfUnchanged,
+  nextSyncRevision,
 } from '../utils/syncHelpers'
 
 const EDITABLE_FIELDS = ['entryNumber', 'farmerName', 'farmerVillage', 'vepariId', 'date', 'items']
 
 /**
- * Next નોંધ નં. = lowest free positive integer among active (non-voided) bills.
- * Gaps are filled; existing numbers are never renumbered.
- * Voided numbers are free to reuse (they do not hold the slot).
+ * Next નોંધ નં. = max(all local numbers including voided) + 1.
+ * Voided numbers stay reserved so offline devices are less likely to
+ * collide by reusing a freed slot.
  */
 async function nextEntryNumber() {
   const rows = await localDb.bills.toArray()
-  const used = new Set()
+  let max = 0
   for (const row of rows) {
-    if (row.isVoided) continue
     const n = Number(row.entryNumber)
-    if (Number.isFinite(n) && n > 0) used.add(n)
+    if (Number.isFinite(n) && n > max) max = n
   }
-  let n = 1
-  while (used.has(n)) n += 1
-  return n
+  return max + 1
 }
 
-/** True if another active bill already uses this note number. */
+/** True if any bill (including voided) already uses this note number. */
 async function isEntryNumberTaken(entryNumber, exceptLocalId) {
   const n = Number(entryNumber)
   if (!Number.isFinite(n) || n <= 0) return true
   const rows = await localDb.bills.toArray()
-  return rows.some(
-    (row) =>
-      row.id !== exceptLocalId &&
-      !row.isVoided &&
-      Number(row.entryNumber) === n,
+  return rows.some((row) => row.id !== exceptLocalId && Number(row.entryNumber) === n)
+}
+
+/** After multi-device sync, renumber later duplicates so નોંધ નં. stays unique. */
+async function resolveEntryNumberCollisions() {
+  const rows = (await localDb.bills.toArray()).filter(
+    (r) => r.syncStatus !== 'pendingDelete',
   )
+  const byNum = new Map()
+  for (const row of rows) {
+    const n = Number(row.entryNumber)
+    if (!Number.isFinite(n) || n <= 0) continue
+    if (!byNum.has(n)) byNum.set(n, [])
+    byNum.get(n).push(row)
+  }
+  for (const group of byNum.values()) {
+    if (group.length < 2) continue
+    group.sort((a, b) => (a.createdAtLocal || 0) - (b.createdAtLocal || 0))
+    for (let i = 1; i < group.length; i++) {
+      const row = group[i]
+      const next = await nextEntryNumber()
+      await localDb.bills.update(row.id, {
+        entryNumber: next,
+        syncStatus: row.firestoreId ? 'pending' : row.syncStatus,
+        syncRevision: nextSyncRevision(row),
+      })
+    }
+  }
 }
 
 /**
@@ -56,22 +76,22 @@ async function persistMissingEntryNumbers() {
   }
 
   const missing = rows
-    .filter((row) => row.entryNumber == null || row.entryNumber === '')
+    .filter(
+      (row) =>
+        row.syncStatus !== 'pendingDelete' &&
+        (row.entryNumber == null || row.entryNumber === ''),
+    )
     .sort((a, b) => (a.createdAtLocal || 0) - (b.createdAtLocal || 0))
 
   for (const row of missing) {
     let n = 1
     while (used.has(n)) n += 1
     used.add(n)
-    await localDb.bills.update(row.id, { entryNumber: n, syncStatus: 'pending' })
-    if (row.firestoreId) {
-      try {
-        await updateDoc(billDocRef(row.firestoreId), { entryNumber: n })
-        await localDb.bills.update(row.id, { syncStatus: 'synced' })
-      } catch (err) {
-        console.error('entryNumber backfill sync failed:', err)
-      }
-    }
+    await localDb.bills.update(row.id, {
+      entryNumber: n,
+      syncStatus: row.firestoreId ? 'pending' : row.syncStatus,
+      syncRevision: nextSyncRevision(row),
+    })
   }
 }
 
@@ -82,6 +102,7 @@ export function useBills() {
   const refreshLocal = useCallback(async () => {
     await dedupeTableByFirestoreId(localDb.bills)
     await persistMissingEntryNumbers()
+    await resolveEntryNumberCollisions()
     const rows = await localDb.bills.toArray()
     rows.sort((a, b) => {
       const na = Number(a.entryNumber) || 0
@@ -98,22 +119,22 @@ export function useBills() {
 
   useEffect(() => {
     let cancelled = false
+    let generation = 0
     const unsubscribe = onSnapshot(billCollectionRef(), async (snapshot) => {
-      for (const docSnap of snapshot.docs) {
-        if (cancelled) return
-        const data = docSnap.data()
-        await upsertByFirestoreId(localDb.bills, docSnap.id, {
-          firestoreId: docSnap.id,
-          ...data,
-          createdAtLocal: data.createdAtLocal || Date.now(),
-        })
-      }
-      if (cancelled) return
-      await removeMissingSynced(
-        localDb.bills,
-        new Set(snapshot.docs.map((d) => d.id)),
-      )
-      await refreshLocal()
+      const gen = ++generation
+      const isCurrent = () => !cancelled && gen === generation
+      await applyCollectionSnapshot(localDb.bills, snapshot, {
+        isCurrent,
+        mapDoc: (docSnap) => {
+          const data = docSnap.data()
+          return {
+            firestoreId: docSnap.id,
+            ...data,
+            createdAtLocal: data.createdAtLocal || Date.now(),
+          }
+        },
+      })
+      if (isCurrent()) await refreshLocal()
     })
     return () => {
       cancelled = true
@@ -155,11 +176,12 @@ export function useBills() {
       firestoreId: ref.id,
       createdAtLocal: Date.now(),
       syncStatus: 'pending',
+      syncRevision: 1,
     })
     await refreshLocal()
     try {
       await setDoc(ref, { ...payload, createdAt: serverTimestamp() })
-      await localDb.bills.update(localId, { syncStatus: 'synced' })
+      await markSyncedIfUnchanged(localDb.bills, localId, 1)
     } catch (err) {
       console.error('Bill save queued locally — Firestore sync failed:', err)
     }
@@ -191,6 +213,7 @@ export function useBills() {
     }
     const newHistoryEntries = diffFields(existing, newValues, EDITABLE_FIELDS, editedBy)
     const editHistory = [...(existing.editHistory || []), ...newHistoryEntries]
+    const syncRevision = nextSyncRevision(existing)
 
     const localUpdate = {
       ...safeChanges,
@@ -199,6 +222,7 @@ export function useBills() {
     }
     await localDb.bills.update(localId, {
       ...localUpdate,
+      syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
     })
     await refreshLocal()
@@ -206,7 +230,7 @@ export function useBills() {
     if (existing.firestoreId) {
       try {
         await updateDoc(billDocRef(existing.firestoreId), localUpdate)
-        await localDb.bills.update(localId, { syncStatus: 'synced' })
+        await markSyncedIfUnchanged(localDb.bills, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
         console.error('Bill edit queued locally — Firestore sync failed:', err)
@@ -226,6 +250,7 @@ export function useBills() {
       editedBy: voidedBy,
       editedAt: voidedAt,
     }
+    const syncRevision = nextSyncRevision(existing)
     const changes = {
       isVoided: true,
       voidReason: reason || '',
@@ -236,14 +261,55 @@ export function useBills() {
 
     await localDb.bills.update(localId, {
       ...changes,
+      syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
     })
+
+    // Cascade: payments on this bill must leave silak/rojmer/dashboard too.
+    if (existing.firestoreId) {
+      const related = await localDb.payments
+        .where('billId')
+        .equals(existing.firestoreId)
+        .toArray()
+      for (const payment of related) {
+        if (payment.isVoided) continue
+        const payRev = nextSyncRevision(payment)
+        const payHistory = {
+          field: 'isVoided',
+          oldValue: false,
+          newValue: true,
+          editedBy: voidedBy,
+          editedAt: voidedAt,
+        }
+        const payChanges = {
+          isVoided: true,
+          voidReason: reason || 'Bill voided',
+          voidedBy,
+          voidedAt,
+          editHistory: [...(payment.editHistory || []), payHistory],
+        }
+        await localDb.payments.update(payment.id, {
+          ...payChanges,
+          syncRevision: payRev,
+          syncStatus: payment.firestoreId ? 'pending' : payment.syncStatus,
+        })
+        if (payment.firestoreId) {
+          try {
+            await updateDoc(paymentDocRef(payment.firestoreId), payChanges)
+            await markSyncedIfUnchanged(localDb.payments, payment.id, payRev)
+          } catch (err) {
+            console.error('Payment void (cascade from bill) queued locally:', err)
+          }
+        }
+      }
+    }
+
     await refreshLocal()
 
     if (existing.firestoreId) {
       try {
         await updateDoc(billDocRef(existing.firestoreId), changes)
-        await localDb.bills.update(localId, { syncStatus: 'synced' })
+        await markSyncedIfUnchanged(localDb.bills, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
         console.error('Bill void queued locally — Firestore sync failed:', err)

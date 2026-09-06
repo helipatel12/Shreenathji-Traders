@@ -1,4 +1,4 @@
-// Financial-year boundary (01/04–30/03) and IST date helpers, built on
+// Financial-year boundary (01/04–31/03) and IST date helpers, built on
 // date-fns per rules.md §1. Used by the dashboard's "today" summary
 // (Phase 2), the year-end archive (Phase 9), and jansa silak's daily
 // rollover (Phase 7) — see phases.md.
@@ -112,4 +112,12 @@ export function monthBounds(dateKey = todayKeyIST()) {
     start: `${year}-${String(month).padStart(2, '0')}-01`,
     end: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
   }
+}
+
+/** Swap inverted from/to so filters never silently empty on reversed picks. */
+export function orderedDateRange(fromDate, toDate) {
+  if (fromDate && toDate && fromDate > toDate) {
+    return { fromDate: toDate, toDate: fromDate }
+  }
+  return { fromDate: fromDate || '', toDate: toDate || '' }
 }

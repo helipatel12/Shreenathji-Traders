@@ -31,15 +31,17 @@ export function roundCurrency(amount) {
 // never a local Dexie id, which wouldn't mean anything on another
 // device.
 // Shared filter for excluding voided bills/payments from any
-// calculation. A voided record stays visible in its own list screen
-// (Bills/Rojmer show it struck through, for audit purposes — never
-// deleted, per rules.md §3) but must never count toward totals,
-// balances, dakhla lines, silak entries, or archive exports anywhere
-// else in the app. Every hook that consumes the raw bills/payments
-// arrays for a calculation (not just displaying them) should filter
-// through this first.
+// calculation. A voided record stays in Dexie/Firestore for audit
+// (rules.md §3 — never hard-deleted) but must never count toward
+// totals, balances, dakhla, silak, dashboard, or archives.
+export function isRecordVoided(record) {
+  if (!record) return false
+  const v = record.isVoided
+  return v === true || v === 1 || v === 'true' || v === '1'
+}
+
 export function excludeVoided(records) {
-  return records.filter((r) => !r.isVoided)
+  return (records || []).filter((r) => !isRecordVoided(r))
 }
 
 export function getBillClearingInfo(bill, payments = []) {

@@ -1,13 +1,13 @@
-// Firestore security rules — Shreenath Traders (single-business deploy).
-// Deployed with the Gujarati/English i18n + CA read-only hardening pass.
+// Firestore security rules — Shreenathji Traders (single-business deploy).
 //
 // - Members only read/write inside their business
-// - owner: full access including settings/users/void
-// - staff: bills, payments, silak (manual); no settings/rates/users
+// - owner: full access including settings/users/void/silak delete
+// - staff: bills, payments, silak create/update (manual); no settings/users
 // - ca: read-only everywhere
-// - Bootstrap: first signed-in user may create the business + own owner
-//   user doc only while the business does not exist yet
-// - Invites: invitee may create their own users/{uid} with the invited role
+// - Bootstrap: first verified signed-in user may create business (with
+//   createdByUid) + owner user doc; orphan business claimable by creator
+// - Invites: role must be staff|ca; invitee creates users/{uid} with that role
+// - Email compares use .lower() to match client-normalized invite ids
 
 rules_version = '2';
 
@@ -16,6 +16,14 @@ service cloud.firestore {
 
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function authEmailLower() {
+      return request.auth.token.email.lower();
     }
 
     function userDoc(businessId) {
@@ -43,14 +51,18 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/businesses/$(businessId));
     }
 
+    function businessData(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)).data;
+    }
+
     function ownInvite(businessId) {
-      return get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(request.auth.token.email.lower()));
+      return get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(authEmailLower()));
     }
 
     function hasPendingInvite(businessId) {
       return isSignedIn() &&
         request.auth.token.email != null &&
-        exists(/databases/$(database)/documents/businesses/$(businessId)/invites/$(request.auth.token.email.lower())) &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/invites/$(authEmailLower())) &&
         ownInvite(businessId).data.status == 'pending';
     }
 
@@ -58,24 +70,46 @@ service cloud.firestore {
       return request.resource.data.get('isVoided', false) == resource.data.get('isVoided', false);
     }
 
+    function isFiniteNumber(value) {
+      return value is number && value == value;
+    }
+
+    function isNonNegNumber(value) {
+      return isFiniteNumber(value) && value >= 0;
+    }
+
+    function isPositiveNumber(value) {
+      return isFiniteNumber(value) && value > 0;
+    }
+
+    function validInviteRole(value) {
+      return value in ['staff', 'ca'];
+    }
+
+    function validMemberRole(value) {
+      return value in ['owner', 'staff', 'ca'];
+    }
+
     match /businesses/{businessId} {
-      // Members may read the business profile. Non-members may only
-      // `get` when the business does not exist yet (bootstrap probe),
-      // or when they have a pending invite (so invite acceptance can
-      // confirm the business before creating their user doc).
       allow get: if isMember(businessId) ||
         (isSignedIn() && !businessExists(businessId)) ||
-        hasPendingInvite(businessId);
+        hasPendingInvite(businessId) ||
+        (isSignedIn() && resource.data.createdByUid == request.auth.uid);
       allow list: if false;
-      allow update, delete: if isOwner(businessId);
-      allow create: if isSignedIn() && !businessExists(businessId);
+      // Owner may update profile fields but cannot reassign createdByUid.
+      allow update: if isOwner(businessId) &&
+        request.resource.data.createdByUid == resource.data.createdByUid;
+      allow delete: if isOwner(businessId);
+      // Bootstrap: verified email + stamp createdByUid (reduces open-signup hijack).
+      allow create: if isEmailVerified() &&
+        !businessExists(businessId) &&
+        request.resource.data.createdByUid == request.auth.uid;
 
       match /users/{userId} {
         allow get: if isSignedIn() && (request.auth.uid == userId || isMember(businessId));
-        allow list: if isMember(businessId);
-        // Owner can edit anyone; a member can edit only their own
-        // profile fields (name/gender/birthday/email) — never their role.
-        allow update: if isOwner(businessId) ||
+        allow list: if isOwner(businessId);
+        allow update: if (isOwner(businessId) &&
+            validMemberRole(request.resource.data.role)) ||
           (isSignedIn() &&
             request.auth.uid == userId &&
             request.resource.data.role == resource.data.role &&
@@ -83,33 +117,49 @@ service cloud.firestore {
               .hasOnly(['name', 'gender', 'birthday', 'email']));
         allow delete: if isOwner(businessId);
         allow create: if isOwner(businessId) ||
-          (isSignedIn() &&
+          // First owner while business doc does not exist yet (batched with business create).
+          (isEmailVerified() &&
             request.auth.uid == userId &&
             !businessExists(businessId) &&
             request.resource.data.role == 'owner' &&
             request.resource.data.keys().hasAll(['email', 'role']) &&
-            request.resource.data.email == request.auth.token.email) ||
-          (isSignedIn() &&
+            request.resource.data.email == authEmailLower()) ||
+          // Claim owner if you created an orphan business doc.
+          (isEmailVerified() &&
+            request.auth.uid == userId &&
+            businessExists(businessId) &&
+            businessData(businessId).createdByUid == request.auth.uid &&
+            request.resource.data.role == 'owner' &&
+            request.resource.data.keys().hasAll(['email', 'role']) &&
+            request.resource.data.email == authEmailLower()) ||
+          // Invite acceptance — verified mailbox + role must match invite.
+          (isEmailVerified() &&
             request.auth.uid == userId &&
             businessExists(businessId) &&
             hasPendingInvite(businessId) &&
+            validInviteRole(ownInvite(businessId).data.role) &&
             request.resource.data.role == ownInvite(businessId).data.role &&
-            request.resource.data.email == request.auth.token.email);
+            request.resource.data.email == authEmailLower());
       }
 
       match /invites/{inviteId} {
         allow get: if isSignedIn() &&
           request.auth.token.email != null &&
-          request.auth.token.email.lower() == inviteId;
+          authEmailLower() == inviteId;
         allow list: if isOwner(businessId);
-        allow create, delete: if isOwner(businessId);
+        allow create: if isOwner(businessId) &&
+          validInviteRole(request.resource.data.role) &&
+          request.resource.data.email == inviteId &&
+          inviteId == inviteId.lower();
+        allow delete: if isOwner(businessId);
         allow update: if isOwner(businessId) ||
-          (isSignedIn() &&
+          (isEmailVerified() &&
             request.auth.token.email != null &&
-            request.auth.token.email.lower() == inviteId &&
+            authEmailLower() == inviteId &&
             resource.data.status == 'pending' &&
             request.resource.data.status == 'accepted' &&
             request.resource.data.role == resource.data.role &&
+            validInviteRole(resource.data.role) &&
             request.resource.data.email == resource.data.email);
       }
 
@@ -120,25 +170,43 @@ service cloud.firestore {
 
       match /bills/{billId} {
         allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId);
+        allow create: if isStaffOrOwner(businessId) &&
+          isNonNegNumber(request.resource.data.totalAmount) &&
+          request.resource.data.date is string &&
+          request.resource.data.keys().hasAll(['date', 'totalAmount', 'items']) &&
+          request.resource.data.get('isVoided', false) == false;
         allow update: if isStaffOrOwner(businessId) &&
-          (isVoidingUnchanged() || isOwner(businessId));
+          (isVoidingUnchanged() || isOwner(businessId)) &&
+          isNonNegNumber(request.resource.data.totalAmount);
         allow delete: if false;
       }
 
       match /payments/{paymentId} {
         allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId);
+        allow create: if isStaffOrOwner(businessId) &&
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.billId is string &&
+          request.resource.data.date is string &&
+          request.resource.data.get('isVoided', false) == false;
         allow update: if isStaffOrOwner(businessId) &&
-          (isVoidingUnchanged() || isOwner(businessId));
+          (isVoidingUnchanged() || isOwner(businessId)) &&
+          isPositiveNumber(request.resource.data.amount);
         allow delete: if false;
       }
 
       match /silakEntries/{entryId} {
         allow read: if isMember(businessId);
         allow create: if isStaffOrOwner(businessId) &&
-          request.resource.data.isManual == true;
-        allow update, delete: if isStaffOrOwner(businessId) &&
+          request.resource.data.isManual == true &&
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.side in ['jama', 'udhar'] &&
+          request.resource.data.date is string;
+        allow update: if isStaffOrOwner(businessId) &&
+          resource.data.isManual == true &&
+          request.resource.data.isManual == true &&
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.side in ['jama', 'udhar'];
+        allow delete: if isOwner(businessId) &&
           resource.data.isManual == true;
       }
     }
