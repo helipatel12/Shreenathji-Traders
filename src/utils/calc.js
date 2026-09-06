@@ -146,14 +146,27 @@ export function resolveRates(vepari, business) {
 // for their older bills recompute under the new rate too, rather than
 // freezing the rate at entry time — this follows directly from "always
 // derived," not a separate choice. See memory.md's decisions log.
+/** Rate(s) per 20 kg for display — one value, or "a / b" when items differ. */
+export function billRatePer20kgDisplay(bill) {
+  const rates = (bill.items || [])
+    .map((item) => item.ratePer20kg)
+    .filter((r) => r != null && r !== '')
+    .map((r) => Number(r))
+    .filter((n) => Number.isFinite(n))
+  if (!rates.length) return ''
+  const unique = [...new Set(rates.map((n) => roundCurrency(n)))]
+  return unique.length === 1 ? unique[0] : unique.join(' / ')
+}
+
 export function computeDakhlaLine(bill, rates) {
   const weightKg = (bill.items || []).reduce((sum, item) => sum + (item.weightKg || 0), 0)
   const goodsAmount = bill.totalAmount || 0
+  const ratePer20kg = billRatePer20kgDisplay(bill)
   const tolai = roundCurrency(rates.tolaiPerKg * weightKg)
   const shes = roundCurrency((rates.shesPercent / 100) * goodsAmount)
   const commission = roundCurrency((rates.commissionPercent / 100) * goodsAmount)
   const total = roundCurrency(goodsAmount + tolai + shes + commission)
-  return { weightKg, goodsAmount, tolai, shes, commission, total }
+  return { weightKg, ratePer20kg, goodsAmount, tolai, shes, commission, total }
 }
 
 // Sums a list of already-computed dakhla lines into one totals object

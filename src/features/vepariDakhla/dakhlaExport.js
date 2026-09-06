@@ -6,13 +6,16 @@
 
 import { formatCurrency } from '../../utils/calc'
 import gu from '../../locales/gu.json'
+import { formatDisplayDate } from '../../utils/dates'
 
 export function buildVepariLedgerRows(lines) {
-  const rows = lines.map(({ bill, weightKg, goodsAmount, tolai, shes, commission, total }) => ({
-    Date: bill.date,
+  const rows = lines.map(({ bill, weightKg, ratePer20kg, goodsAmount, tolai, shes, commission, total }) => ({
+    Date: formatDisplayDate(bill.date),
     [gu.bills.entryNumberLabel]: bill.entryNumber,
     Farmer: bill.farmerName,
+    Village: bill.farmerVillage || '',
     [gu.dakhla.weightLabel]: weightKg,
+    [gu.bills.rateLabel]: ratePer20kg,
     [gu.dakhla.goodsAmountLabel]: goodsAmount,
     [gu.dakhla.tolaiLabel]: tolai,
     [gu.dakhla.shesLabel]: shes,
@@ -27,7 +30,9 @@ export function buildVepariLedgerPdfColumns() {
     { header: 'Date', key: 'Date' },
     { header: gu.bills.entryNumberLabel, key: gu.bills.entryNumberLabel },
     { header: 'Farmer', key: 'Farmer' },
+    { header: 'Village', key: 'Village' },
     { header: 'Weight (kg)', key: gu.dakhla.weightLabel },
+    { header: gu.bills.rateLabel, key: gu.bills.rateLabel },
     { header: 'Goods amount', key: gu.dakhla.goodsAmountLabel },
     { header: 'Tolai', key: gu.dakhla.tolaiLabel },
     { header: 'Shes', key: gu.dakhla.shesLabel },

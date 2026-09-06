@@ -1,22 +1,54 @@
 # Shreenath Traders Management
 
-Digital ledger for **Shreenathji Traders** (agricultural commission agent / aadatiya). Replaces paper કેશ મેમો, વેપારી દાખલા, રોજમેળ, and જણસે સિલક with one offline-first Firebase app.
+Offline-first digital ledger for **Shreenathji Traders** — an agricultural commission agent (આડતીયા) business in Tarapur.
 
-**Live:** https://shreenath-traders.web.app
+Replaces paper **કેશ મેમો**, **વેપારી દાખલા**, **રોજમેળ**, and **જણસે સિલક** with a single Progressive Web App used by the broker’s team. Farmers and buyers appear as parties on records; they do not log in.
 
-Used by the **broker** (owner/staff). Farmers and buyers are parties on bills — not login roles.
+**Live app:** [https://shreenath-traders.web.app](https://shreenath-traders.web.app)
+
+---
 
 ## Features
 
-- **Cash memo (બિલ)** — create, edit, void, print in paper-memo format
-- **Vepari dakhla** — auto ledger with tolai / shes / commission
-- **Rojmer** — farmer payment tracking
-- **Jansa silak** — daily cash position
-- **Gujarati ↔ English** language toggle (UI); printed bills stay Gujarati
-- **Roles** — owner (full), staff (write ledgers), CA (read-only)
-- Offline-first via Dexie + Firestore
+| Module | What it does |
+|--------|----------------|
+| **Cash memo (બિલ)** | Create, edit, void, and print bills; immutable-by-default note numbers with optional edit; searchable buyer picker |
+| **Vepari dakhla** | Auto ledger from bills — weight, rate (ભાવ), tolai / shes / commission / total |
+| **Rojmer** | Track farmer payments against bills; pending / cleared views; quick “record payment” entry |
+| **Jansa silak** | Daily cash position with auto + manual જમા / ઉધાર entries |
+| **Dashboard** | Today’s KPIs, income / P&L charts, ranking |
+| **CA reports** | Read-only FY / date-range totals and exports for the accountant |
+| **Settings** | Buyers (veparis), business profile, default rates, invites / users, year-end backup |
+
+Also included:
+
+- **Gujarati ↔ English** UI toggle (prints stay Gujarati, matching the paper books)
+- **Roles:** Owner (full), Staff (write ledgers), CA (read-only)
+- **Offline-first:** Dexie (IndexedDB) + background Firestore sync
+- **Export / print:** Excel, CSV, PDF, and paper-style cash memo / dakhla layouts
+- **Installable PWA** for phone and desktop
+
+---
+
+## Tech stack
+
+- **UI:** React 19, Vite 8, Tailwind CSS 4, React Router
+- **Data:** Firebase Auth, Cloud Firestore, Dexie
+- **Forms:** React Hook Form + Zod
+- **Exports:** SheetJS (xlsx), jsPDF, JSZip
+- **PWA:** vite-plugin-pwa
+
+---
 
 ## Getting started
+
+### Prerequisites
+
+- Node.js 20+ (recommended)
+- A Firebase project with **Authentication (Email/Password)** and **Firestore** enabled
+- Firebase CLI (for deploy): `npm i -g firebase-tools`
+
+### Install & run
 
 ```bash
 npm install
@@ -24,35 +56,109 @@ cp .env.example .env   # fill in Firebase web config
 npm run dev
 ```
 
-### Firebase setup
+Open the URL Vite prints (usually `http://localhost:5173`).
 
-1. Create a project at https://console.firebase.google.com (Spark/free is fine).
-2. Enable **Firestore** and **Authentication → Email/Password**.
-3. Copy web app config into `.env` (see `.env.example`).
-4. Deploy security rules:
+### Environment
 
-```bash
-firebase deploy --only firestore:rules,storage:rules
+Copy `.env.example` → `.env` and set the Firebase web app values:
+
+```env
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
+VITE_BUSINESS_ID=shreenath-traders
 ```
 
-The first account to sign up becomes the **owner**. Invite staff/CA from Settings.
+Never commit `.env`. `VITE_BUSINESS_ID` defaults to `shreenath-traders` if omitted.
+
+### Firebase setup
+
+1. Create a project in the [Firebase Console](https://console.firebase.google.com) (Spark/free is fine for Auth email + Firestore).
+2. Enable **Authentication → Email/Password** and **Firestore**.
+3. Register a web app and paste its config into `.env`.
+4. Deploy security rules when ready:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+The **first account to sign up** becomes the business **owner**. Invite staff and CA users from Settings afterward.
 
 ### Scripts
 
-- `npm run dev` — local development
-- `npm run build` — production build + PWA
-- `npm run preview` — preview production build
-- `npm run lint` — oxlint
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Local development server |
+| `npm run build` | Production build + PWA assets |
+| `npm run preview` | Preview the production build |
+| `npm run lint` | Lint with oxlint |
 
-## Docs
+### Deploy (hosting)
 
-- `prd.md` — product scope
-- `architecture.md` — data model & offline design
-- `rules.md` — engineering constraints
-- `design.md` — UI identity
-- `phases.md` — build phases
-- `memory.md` — decision log
+Only when you intentionally want to publish:
 
-## Print
+```bash
+npm run build
+firebase deploy --only hosting,firestore:rules
+```
 
-Cash memo print (`src/features/bills/billPrint.js`) matches the red-bordered paper pad: farmer + village, buyer + village, weight as ક્વિ./કી., amount as રૂા./પૈસા.
+---
+
+## Roles
+
+| Role | Access |
+|------|--------|
+| **Owner** | Full access — settings, rates, users, void, year-end backup |
+| **Staff** | Create / edit ledgers (bills, payments, silak manuals) |
+| **CA** | Read-only reports and ledgers |
+
+---
+
+## Architecture (short)
+
+- **Source of truth online:** Firestore under `businesses/{businessId}/…`
+- **Source of truth offline:** Dexie tables (`bills`, `payments`, `veparis`, `silakEntries`) with `syncStatus`
+- **Derived, not stored:** dakhla lines, rojmer balances, silak day totals — computed on read via `src/utils/calc.js`
+- **Dates:** stored as `YYYY-MM-DD` (IST calendar day); UI displays `DD-MM-YYYY`
+- **Financial year:** 1 April – 31 March
+
+For the full model and sync rules, see `architecture.md`.
+
+---
+
+## Project docs
+
+| File | Contents |
+|------|----------|
+| `prd.md` | Product scope and requirements |
+| `architecture.md` | Data model, offline, sync |
+| `rules.md` | Engineering constraints |
+| `design.md` | Visual identity |
+| `phases.md` | Build phases and done-when criteria |
+| `memory.md` | Decision / progress log |
+
+---
+
+## Repository layout
+
+```
+src/
+  components/     Shared UI (tables, shell, searchable selects, print/export)
+  context/        Auth + locale
+  db/             Dexie schema
+  features/       Screens by domain (bills, dakhla, rojmer, silak, …)
+  firebase/       Auth + Firestore helpers
+  hooks/          Data hooks (local-first)
+  locales/        gu.json / en.json
+  sync/           Sync engine
+  utils/          calc, dates, export, vepari helpers
+```
+
+---
+
+## License
+
+Private business software for Shreenathji Traders. All rights reserved.

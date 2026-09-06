@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import gu from '../locales/gu.json'
 import en from '../locales/en.json'
 import { formatCurrency as formatCurrencyRaw } from '../utils/calc'
+import { formatDisplayDate } from '../utils/dates'
 import { localizeDigits } from '../utils/numbers'
 
 const STORAGE_KEY = 'stm-lang'
@@ -81,6 +82,12 @@ export function LocaleProvider({ children }) {
   /** Any number/date/string — ASCII digits → Gujarati when lang is gu. */
   const formatDigits = useCallback((value) => localizeDigits(value, lang), [lang])
 
+  /** Ledger date key (YYYY-MM-DD) → DD-MM-YYYY with locale digits. */
+  const formatDate = useCallback(
+    (dateKey) => localizeDigits(formatDisplayDate(dateKey), lang),
+    [lang],
+  )
+
   const value = useMemo(
     () => ({
       lang,
@@ -91,8 +98,9 @@ export function LocaleProvider({ children }) {
       catalog,
       formatCurrency,
       formatDigits,
+      formatDate,
     }),
-    [lang, setLang, toggleLang, t, printT, catalog, formatCurrency, formatDigits],
+    [lang, setLang, toggleLang, t, printT, catalog, formatCurrency, formatDigits, formatDate],
   )
 
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>

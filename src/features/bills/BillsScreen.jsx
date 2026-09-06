@@ -7,7 +7,7 @@ import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
 import { excludeVoided } from '../../utils/calc'
 import { todayKeyIST } from '../../utils/dates'
-import { findVepari, vepariDisplayName, vepariStableId } from '../../utils/vepari'
+import { findVepari, vepariDisplayName } from '../../utils/vepari'
 import BillForm, { billToFormValues } from './BillForm'
 import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
@@ -86,7 +86,7 @@ function VoidConfirmDialog({ onConfirm, onCancel }) {
 
 export default function BillsScreen() {
   const { user, isOwner, canWrite } = useAuth()
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { bills, loading, addBill, updateBill, voidBill } = useBills()
   const { veparis } = useVeparis()
   const { business } = useBusiness()
@@ -244,7 +244,7 @@ export default function BillsScreen() {
         ],
       },
       render: (bill) => (
-        <span className="font-numeric whitespace-nowrap">{formatDigits(bill.date)}</span>
+        <span className="font-numeric whitespace-nowrap">{formatDate(bill.date)}</span>
       ),
     },
     {
@@ -264,10 +264,7 @@ export default function BillsScreen() {
         value: vepariFilter,
         onChange: setVepariFilter,
         allLabel: t('bills.allVeparis'),
-        options: veparis.map((v) => ({
-          value: String(vepariStableId(v)),
-          label: v.name,
-        })),
+        veparis,
       },
       render: (bill) => (
         <span className="badge badge-blue">{vepariDisplayName(veparis, bill.vepariId)}</span>

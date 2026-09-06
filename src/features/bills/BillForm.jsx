@@ -2,7 +2,7 @@
 // Goods: preset list (incl. ઘઉં) + free-text "other".
 
 import { useEffect, useMemo } from 'react'
-import { useForm, useFieldArray } from 'react-hook-form'
+import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Plus, Trash2 } from 'lucide-react'
@@ -12,6 +12,7 @@ import { todayKeyIST } from '../../utils/dates'
 import { findVepari, vepariStableId } from '../../utils/vepari'
 import { useLocale } from '../../context/LocaleContext'
 import { preprocessNumber, parseLocaleNumber, convertIndicDigits } from '../../utils/numbers'
+import VepariSelect from '../../components/VepariSelect'
 import guCatalog from '../../locales/gu.json'
 
 const CUSTOM = guCatalog.bills.customOptionValue
@@ -26,6 +27,7 @@ function emptyLine() {
 
 export function billToFormValues(bill) {
   return {
+    entryNumber: bill.entryNumber ?? '',
     farmerName: bill.farmerName,
     farmerVillage: bill.farmerVillage,
     vepariId: bill.vepariId,
@@ -43,10 +45,17 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
   const { t, formatCurrency } = useLocale()
   const { veparis } = useVeparis()
   const goodsLabels = t('bills.goodsTypes')
+  const isEdit = initialValues?.entryNumber != null && initialValues.entryNumber !== ''
 
   const schema = useMemo(
     () =>
       z.object({
+        entryNumber: z.preprocess(
+          preprocessNumber,
+          isEdit
+            ? z.number().int().positive(t('bills.mustBePositive'))
+            : z.number().int().positive(t('bills.mustBePositive')).optional(),
+        ),
         farmerName: z.string().trim().min(1, t('bills.required')),
         farmerVillage: z.string().trim().min(1, t('bills.required')),
         vepariId: z.string().min(1, t('bills.selectVepari')),
@@ -73,7 +82,7 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
           )
           .min(1, t('bills.addAtLeastOne')),
       }),
-    [t],
+    [t, isEdit],
   )
 
   const {
@@ -83,10 +92,12 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
     watch,
     reset,
     setValue,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: initialValues ?? {
+      entryNumber: '',
       farmerName: '',
       farmerVillage: '',
       vepariId: '',
@@ -136,19 +147,57 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
       }
     })
     if (items.some((i) => !i.type)) return
-    await onSubmit({
-      farmerName: values.farmerName,
-      farmerVillage: values.farmerVillage,
-      vepariId: vepari ? vepariStableId(vepari) : values.vepariId,
-      date: values.date,
-      items,
-    })
+    const entryNumber = Number.isFinite(values.entryNumber) ? values.entryNumber : undefined
+    try {
+      await onSubmit({
+        entryNumber,
+        farmerName: values.farmerName,
+        farmerVillage: values.farmerVillage,
+        vepariId: vepari ? vepariStableId(vepari) : values.vepariId,
+        date: values.date,
+        items,
+      })
+    } catch (err) {
+      if (err?.message === 'ENTRY_NUMBER_TAKEN') {
+        setError('entryNumber', { message: t('bills.entryNumberTaken') })
+        return
+      }
+      throw err
+    }
   }
 
   return (
     <form onSubmit={handleSubmit(submit)} className="space-y-5">
       <fieldset disabled={readOnly} className="space-y-5 border-0 p-0 m-0">
         <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="entryNumber" className="block text-body text-ink font-medium mb-1.5">
+              {t('bills.entryNumberLabel')}
+            </label>
+            <input
+              id="entryNumber"
+              inputMode="numeric"
+              className={inputClasses}
+              placeholder={isEdit ? undefined : t('bills.entryNumberAuto')}
+              {...register('entryNumber', {
+                onChange: (e) => {
+                  setValue('entryNumber', convertIndicDigits(e.target.value), {
+                    shouldValidate: true,
+                  })
+                },
+              })}
+            />
+            {errors.entryNumber && (
+              <p className="text-caption text-danger mt-1">{errors.entryNumber.message}</p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="date" className="block text-body text-ink font-medium mb-1.5">
+              {t('bills.dateLabel')}
+            </label>
+            <input id="date" type="date" className={inputClasses} {...register('date')} />
+            {errors.date && <p className="text-caption text-danger mt-1">{errors.date.message}</p>}
+          </div>
           <div>
             <label htmlFor="farmerName" className="block text-body text-ink font-medium mb-1.5">
               {t('bills.farmerNameLabel')}
@@ -168,25 +217,22 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
             )}
           </div>
           <div>
-            <label htmlFor="date" className="block text-body text-ink font-medium mb-1.5">
-              {t('bills.dateLabel')}
-            </label>
-            <input id="date" type="date" className={inputClasses} {...register('date')} />
-            {errors.date && <p className="text-caption text-danger mt-1">{errors.date.message}</p>}
-          </div>
-          <div>
             <label htmlFor="vepariId" className="block text-body text-ink font-medium mb-1.5">
               {t('bills.vepariLabel')}
             </label>
-            <select id="vepariId" className={inputClasses} {...register('vepariId')}>
-              <option value="">—</option>
-              {veparis.map((v) => (
-                <option key={vepariStableId(v) || v.id} value={vepariStableId(v)}>
-                  {v.name}
-                  {v.village ? ` · ${v.village}` : ''}
-                </option>
-              ))}
-            </select>
+            <Controller
+              name="vepariId"
+              control={control}
+              render={({ field }) => (
+                <VepariSelect
+                  id="vepariId"
+                  veparis={veparis}
+                  value={field.value}
+                  onChange={field.onChange}
+                  disabled={readOnly}
+                />
+              )}
+            />
             {selectedVepari && (
               <p className="text-caption text-ink-muted mt-1">{selectedVepari.village}</p>
             )}

@@ -26,7 +26,7 @@ import {
 
 function DayView() {
   const { user, canWrite, isOwner } = useAuth()
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const [date, setDate] = useState(todayKeyIST())
   const [mode, setMode] = useState('list')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
@@ -315,7 +315,7 @@ function DayView() {
 }
 
 function RangeView({ mode }) {
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const today = todayKeyIST()
   const bounds = mode === 'month' ? monthBounds(today) : financialYearBounds(today)
   const [fromDate, setFromDate] = useState(bounds.start)
@@ -373,7 +373,7 @@ function RangeView({ mode }) {
         ],
       },
       render: (day) => (
-        <span className="font-numeric whitespace-nowrap">{formatDigits(day.date)}</span>
+        <span className="font-numeric whitespace-nowrap">{formatDate(day.date)}</span>
       ),
     },
     {
@@ -473,7 +473,7 @@ function RangeView({ mode }) {
           }
           renderExpanded={(day) => (
             <p className="text-body text-ink-muted">
-              {formatDigits(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
+              {formatDate(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
               {t('silak.udharLabel')} {formatCurrency(day.udharTotal)} ·{' '}
               {t('silak.closingLabel')} {formatCurrency(day.closingBalance)}
             </p>

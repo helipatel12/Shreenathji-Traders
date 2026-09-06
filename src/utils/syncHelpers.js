@@ -14,17 +14,6 @@ export async function upsertByFirestoreId(table, firestoreId, remote) {
     ) {
       merged.entryNumber = existing.entryNumber
     }
-    // Keep the first assigned note number if both sides disagree
-    // (local is source of truth once set — paper memo already printed).
-    if (
-      existing.entryNumber != null &&
-      existing.entryNumber !== '' &&
-      merged.entryNumber != null &&
-      merged.entryNumber !== '' &&
-      Number(existing.entryNumber) !== Number(merged.entryNumber)
-    ) {
-      merged.entryNumber = existing.entryNumber
-    }
     await table.update(existing.id, merged)
     // Collapse any accidental duplicate rows with the same firestoreId.
     const dupes = await table.where('firestoreId').equals(firestoreId).toArray()

@@ -5,11 +5,12 @@
 // page's day-by-day layout — design.md §4/§7).
 
 import { formatCurrency } from '../../utils/calc'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 export function buildDayRows(day) {
   const rows = day.entries.map((entry) => ({
-    Date: entry.date,
+    Date: formatDisplayDate(entry.date),
     [gu.silak.sideField]: entry.side === 'jama' ? gu.silak.jamaLabel : gu.silak.udharLabel,
     [gu.silak.labelField]: entry.label,
     [gu.silak.amountField]: formatCurrency(entry.amount),
@@ -43,7 +44,7 @@ export function buildDayPdfColumns() {
 
 export function buildRangeRows(days) {
   return days.map((day) => ({
-    Date: day.date,
+    Date: formatDisplayDate(day.date),
     [gu.silak.openingLabel]: formatCurrency(day.openingBalance),
     [gu.silak.jamaLabel]: formatCurrency(day.jamaTotal),
     [gu.silak.udharLabel]: formatCurrency(day.udharTotal),

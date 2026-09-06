@@ -1,11 +1,17 @@
 import { Fragment } from 'react'
 import { ChevronRight } from 'lucide-react'
+import SearchableSelect from './SearchableSelect'
+import VepariSelect from './VepariSelect'
 
 /**
  * Shared clickable data table (MixHub-style).
  * columns: [{
  *   key, header, align?, className?, render?,
- *   filter?: { value, onChange, options: [{value,label}], allLabel? }
+ *   filter?: {
+ *     value, onChange, options?, allLabel?,
+ *     searchable?: boolean,
+ *     veparis?: array  // searchable vepari picker
+ *   }
  * }]
  */
 export default function DataTable({
@@ -23,6 +29,60 @@ export default function DataTable({
 }) {
   const colSpan = (onRowClick ? 1 : 0) + columns.length
   const hasHeaderFilters = columns.some((c) => c.filter)
+
+  function renderFilter(col) {
+    const f = col.filter
+    if (!f) {
+      return hasHeaderFilters ? <div className="th-filter-spacer" aria-hidden /> : null
+    }
+    if (f.veparis) {
+      return (
+        <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+          <VepariSelect
+            compact
+            veparis={f.veparis}
+            value={f.value}
+            onChange={f.onChange}
+            emptyLabel={f.allLabel || col.header}
+            placeholder={f.allLabel || col.header}
+            aria-label={f.allLabel || col.header}
+          />
+        </div>
+      )
+    }
+    if (f.searchable) {
+      return (
+        <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+          <SearchableSelect
+            compact
+            options={f.options || []}
+            value={f.value}
+            onChange={f.onChange}
+            emptyLabel={f.allLabel || col.header}
+            placeholder={f.allLabel || col.header}
+            searchPlaceholder={f.allLabel || col.header}
+            aria-label={f.allLabel || col.header}
+          />
+        </div>
+      )
+    }
+    return (
+      <select
+        value={f.value}
+        onChange={(e) => f.onChange(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        className="th-filter-select"
+        aria-label={f.allLabel || col.header}
+      >
+        <option value="">{f.allLabel || col.header}</option>
+        {(f.options || []).map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
 
   return (
     <div className="data-table-wrap">
@@ -48,24 +108,7 @@ export default function DataTable({
                       .join(' ')}
                   >
                     <div className="th-label">{col.header}</div>
-                    {col.filter ? (
-                      <select
-                        value={col.filter.value}
-                        onChange={(e) => col.filter.onChange(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="th-filter-select"
-                        aria-label={col.filter.allLabel || col.header}
-                      >
-                        <option value="">{col.filter.allLabel || col.header}</option>
-                        {col.filter.options.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : hasHeaderFilters ? (
-                      <div className="th-filter-spacer" aria-hidden />
-                    ) : null}
+                    {renderFilter(col)}
                   </th>
                 ))}
               </tr>

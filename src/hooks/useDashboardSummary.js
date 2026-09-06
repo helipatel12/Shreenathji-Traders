@@ -63,7 +63,7 @@ const MONTH_SHORT = [
 
 function labelDay(dateKey) {
   const [, m, d] = dateKey.split('-')
-  return `${Number(d)} ${MONTH_SHORT[Number(m) - 1]}`
+  return `${d}-${m}`
 }
 
 function labelMonth(dateKey) {
@@ -77,9 +77,9 @@ function labelWeek(dates) {
   const [, m1, d1] = first.split('-')
   const [, m2, d2] = last.split('-')
   if (m1 === m2) {
-    return `${Number(d1)}–${Number(d2)} ${MONTH_SHORT[Number(m1) - 1]}`
+    return `${d1}-${d2} ${MONTH_SHORT[Number(m1) - 1]}`
   }
-  return `${Number(d1)} ${MONTH_SHORT[Number(m1) - 1]}–${Number(d2)} ${MONTH_SHORT[Number(m2) - 1]}`
+  return `${d1}-${m1} → ${d2}-${m2}`
 }
 
 function inferBucket(from, to) {

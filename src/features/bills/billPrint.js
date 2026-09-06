@@ -3,6 +3,7 @@
 
 import { formatCurrency } from '../../utils/calc'
 import { toGujaratiDigits } from '../../utils/numbers'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 const P = gu.bills.print
@@ -16,11 +17,8 @@ function esc(value) {
 }
 
 function formatWeight(weightKg) {
-  const kg = Number(weightKg) || 0
-  const quintals = Math.floor(kg / 100)
-  const remainder = kg - quintals * 100
-  const remainderStr = Number.isInteger(remainder) ? String(remainder) : remainder.toFixed(2)
-  const raw = quintals > 0 ? `${quintals}-${remainderStr}` : `${remainderStr}`
+  const n = Number(weightKg) || 0
+  const raw = Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100)
   return toGujaratiDigits(raw)
 }
 
@@ -270,7 +268,7 @@ function buildHtml({ bill, business, vepariName, vepariVillage, fontFace }) {
     </div>
     <div class="memo-noline">
       <span>${esc(P.memoNumberLabel)} ${esc(toGujaratiDigits(bill.entryNumber))}</span>
-      <span>${esc(P.dateLabel)} ${esc(toGujaratiDigits(bill.date))}</span>
+      <span>${esc(P.dateLabel)} ${esc(toGujaratiDigits(formatDisplayDate(bill.date)))}</span>
     </div>
     <div class="party-block">
       <div class="party-row">

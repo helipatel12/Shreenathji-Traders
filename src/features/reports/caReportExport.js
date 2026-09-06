@@ -1,12 +1,13 @@
 // Flat row shapers for Phase 10 CA / reporting exports.
 
 import { formatCurrency } from '../../utils/calc'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 export function buildCaSummaryRows(summary, fromDate, toDate) {
   return [
-    { Field: 'From', Value: fromDate || '—' },
-    { Field: 'To', Value: toDate || '—' },
+    { Field: 'From', Value: formatDisplayDate(fromDate) || '—' },
+    { Field: 'To', Value: formatDisplayDate(toDate) || '—' },
     { Field: 'Bills', Value: summary.billCount },
     { Field: 'Goods total', Value: formatCurrency(summary.goodsTotal) },
     { Field: 'Commission earned', Value: formatCurrency(summary.commissionEarned) },
@@ -20,7 +21,7 @@ export function buildCaSummaryRows(summary, fromDate, toDate) {
 
 export function buildCaBillRows(billRows) {
   return billRows.map(({ bill, vepariName, totalPaid, balance, isCleared }) => ({
-    Date: bill.date,
+    Date: formatDisplayDate(bill.date),
     [gu.bills.entryNumberLabel]: bill.entryNumber,
     Farmer: bill.farmerName,
     Village: bill.farmerVillage,
@@ -47,7 +48,7 @@ export function buildCaVepariRows(vepariRows) {
 
 export function buildCaOutstandingRows(outstanding) {
   return outstanding.map(({ bill, vepariName, totalPaid, balance }) => ({
-    Date: bill.date,
+    Date: formatDisplayDate(bill.date),
     [gu.bills.entryNumberLabel]: bill.entryNumber,
     Farmer: bill.farmerName,
     Vepari: vepariName,

@@ -11,6 +11,7 @@
 
 import { formatCurrency } from '../../utils/calc'
 import { vepariDisplayName } from '../../utils/vepari'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 export function buildRojmerRows(rows, veparis, payments) {
@@ -28,7 +29,7 @@ export function buildRojmerRows(rows, veparis, payments) {
     if (billPayments.length === 0) {
       exportRows.push({
         [gu.bills.entryNumberLabel]: bill.entryNumber,
-        'Bill date': bill.date,
+        'Bill date': formatDisplayDate(bill.date),
         Farmer: bill.farmerName,
         Vepari: vepari,
         'Bill total': formatCurrency(bill.totalAmount),
@@ -53,16 +54,17 @@ export function buildRojmerRows(rows, veparis, payments) {
         // payments too, which reads as if that balance existed at
         // that point in time rather than reflecting all payments.
         [gu.bills.entryNumberLabel]: bill.entryNumber,
-        'Bill date': bill.date,
+        'Bill date': formatDisplayDate(bill.date),
         Farmer: bill.farmerName,
         Vepari: vepari,
         'Bill total': formatCurrency(bill.totalAmount),
-        'Payment date': payment.date,
+        'Payment date': formatDisplayDate(payment.date),
         'Payment amount': formatCurrency(payment.amount),
-        [gu.rojmer.paymentTypeLabel]: gu.rojmer[payment.type],
+        [gu.rojmer.paymentTypeLabel]: gu.rojmer[payment.type] || payment.type,
         [gu.rojmer.balanceLabel]: isLast ? formatCurrency(balance) : '',
         Status: isLast ? status : '',
-        [gu.rojmer.clearedOnLabel]: isLast ? clearingDate || '' : '',
+        [gu.rojmer.clearedOnLabel]:
+          isLast && isCleared ? formatDisplayDate(clearingDate) : '',
       })
     })
   }

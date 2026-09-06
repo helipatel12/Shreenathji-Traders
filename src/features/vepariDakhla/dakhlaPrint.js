@@ -4,6 +4,7 @@
 
 import { formatCurrency } from '../../utils/calc'
 import { toGujaratiDigits } from '../../utils/numbers'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 const P = gu.dakhla.print
@@ -101,8 +102,8 @@ function resolvePrintDate(lines) {
   if (!lines.length) return ''
   const dates = lines.map((l) => l.bill.date).filter(Boolean).sort()
   if (!dates.length) return ''
-  if (dates[0] === dates[dates.length - 1]) return dates[0]
-  return `${dates[0]} – ${dates[dates.length - 1]}`
+  if (dates[0] === dates[dates.length - 1]) return formatDisplayDate(dates[0])
+  return `${formatDisplayDate(dates[0])} – ${formatDisplayDate(dates[dates.length - 1])}`
 }
 
 function resolveSerial(lines) {

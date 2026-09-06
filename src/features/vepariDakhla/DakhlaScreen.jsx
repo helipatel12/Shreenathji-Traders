@@ -12,7 +12,7 @@ import { useBills } from '../../hooks/useBills'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useVepariDakhla, useAllVepariDakhlaSummary } from '../../hooks/useVepariDakhla'
 import { useLocale } from '../../context/LocaleContext'
-import { todayKeyIST } from '../../utils/dates'
+import { todayKeyIST, formatDisplayDate } from '../../utils/dates'
 import { vepariStableId } from '../../utils/vepari'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import BillForm, { billToFormValues } from '../bills/BillForm'
@@ -22,6 +22,7 @@ import PrintButton from '../../components/PrintButton'
 import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
+import VepariSelect from '../../components/VepariSelect'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printDakhla } from './dakhlaPrint'
@@ -34,7 +35,7 @@ import {
 
 function SingleVepariLedger() {
   const { user, canWrite } = useAuth()
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { veparis } = useVeparis()
   const { updateBill } = useBills()
   const { business } = useBusiness()
@@ -52,11 +53,24 @@ function SingleVepariLedger() {
     const q = search.trim().toLowerCase()
     const filtered = lines.filter((line) => {
       if (!q) return true
-      return (
-        String(line.bill.farmerName || '').toLowerCase().includes(q) ||
-        String(line.bill.entryNumber || '').toLowerCase().includes(q) ||
-        String(line.bill.farmerVillage || '').toLowerCase().includes(q)
-      )
+      const goods = (line.bill.items || [])
+        .map((item) => item.type || item.customType || '')
+        .join(' ')
+        .toLowerCase()
+      const haystack = [
+        line.bill.farmerName,
+        line.bill.farmerVillage,
+        line.bill.entryNumber,
+        vepari?.name,
+        vepari?.village,
+        goods,
+        line.bill.date,
+        formatDisplayDate(line.bill.date),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(q)
     })
     return sortByNoteOrDate(filtered, {
       sortKey,
@@ -64,7 +78,7 @@ function SingleVepariLedger() {
       getNote: (line) => line.bill.entryNumber,
       getDate: (line) => line.bill.date,
     })
-  }, [lines, search, sortKey, sortDir])
+  }, [lines, search, sortKey, sortDir, vepari])
 
   function setNoteSort(value) {
     setSortKey('entryNumber')
@@ -117,7 +131,7 @@ function SingleVepariLedger() {
       header: t('bills.dateLabel'),
       filter: dateSortFilter(t, sortKey, sortDir, setDateSort),
       render: (line) => (
-        <span className="font-numeric whitespace-nowrap">{formatDigits(line.bill.date)}</span>
+        <span className="font-numeric whitespace-nowrap">{formatDate(line.bill.date)}</span>
       ),
     },
     {
@@ -141,6 +155,15 @@ function SingleVepariLedger() {
       header: t('dakhla.weightLabel'),
       align: 'right',
       render: (line) => formatDigits(line.weightKg),
+    },
+    {
+      key: 'rate',
+      header: t('bills.rateLabel'),
+      align: 'right',
+      render: (line) =>
+        line.ratePer20kg === '' || line.ratePer20kg == null
+          ? '—'
+          : formatDigits(line.ratePer20kg),
     },
     {
       key: 'goods',
@@ -201,26 +224,29 @@ function SingleVepariLedger() {
 
   return (
     <div>
+      <div className="mb-4">
+        <TableToolbar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder={t('dakhla.searchPlaceholder')}
+        />
+      </div>
+
       <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div>
+        <div className="min-w-64 max-w-md w-full">
           <label className="block text-caption text-ink-muted mb-1.5">
             {t('dakhla.selectVepariLabel')}
           </label>
-          <select
+          <VepariSelect
+            veparis={veparis}
             value={vepariId}
-            onChange={(e) => {
-              setVepariId(e.target.value)
+            onChange={(id) => {
+              setVepariId(id)
               setSelectedId(null)
             }}
-            className="text-body text-ink bg-surface border border-border rounded-xl py-2.5 px-3 min-h-12 min-w-48"
-          >
-            <option value="">—</option>
-            {veparis.map((v) => (
-              <option key={vepariStableId(v) || v.id} value={vepariStableId(v)}>
-                {v.name}
-              </option>
-            ))}
-          </select>
+            emptyLabel="—"
+            placeholder={t('dakhla.selectVepariLabel')}
+          />
         </div>
       </div>
 
@@ -251,12 +277,9 @@ function SingleVepariLedger() {
           empty={<p className="text-body text-ink-muted">{t('dakhla.noBills')}</p>}
           meta={t('common.showingCount', { count: formatDigits(visibleLines.length) })}
           toolbar={
-            <TableToolbar
-              search={search}
-              onSearchChange={setSearch}
-              searchPlaceholder={t('bills.searchPlaceholder')}
-              actions={
-                lines.length > 0 ? (
+            lines.length > 0 ? (
+              <TableToolbar
+                actions={
                   <>
                     <PrintButton onClick={handlePrint} />
                     <ExportMenu
@@ -266,13 +289,13 @@ function SingleVepariLedger() {
                       onExportPDF={() => doExport('pdf')}
                     />
                   </>
-                ) : null
-              }
-            />
+                }
+              />
+            ) : null
           }
           renderExpanded={(line) => (
             <p className="text-caption text-ink-muted">
-              {line.bill.farmerName} · {formatDigits(line.bill.date)}
+              {line.bill.farmerName} · {formatDate(line.bill.date)}
             </p>
           )}
           footer={
@@ -283,6 +306,7 @@ function SingleVepariLedger() {
                   {t('dakhla.totalLabel')}
                 </td>
                 <td className="px-4 py-3 text-right">{formatDigits(totals.weightKg)}</td>
+                <td className="px-4 py-3 text-right">—</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.goodsAmount)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.tolai)}</td>
                 <td className="px-4 py-3 text-right">{formatCurrency(totals.shes)}</td>
@@ -303,10 +327,20 @@ function AllVepariSummary() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [selectedId, setSelectedId] = useState(null)
+  const [search, setSearch] = useState('')
   const { rows, loading } = useAllVepariDakhlaSummary(fromDate, toDate)
 
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((row) => {
+      const hay = `${row.vepari.name || ''} ${row.vepari.village || ''}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [rows, search])
+
   function doExport(format) {
-    const exportRows = buildAllVepariSummaryRows(rows)
+    const exportRows = buildAllVepariSummaryRows(visibleRows)
     const range = fromDate || toDate ? `${fromDate || 'start'}_to_${toDate || todayKeyIST()}` : 'all'
     const filename = `dakhla_summary_${range}`
     const title = 'Vepari Dakhla — All veparis'
@@ -316,7 +350,11 @@ function AllVepariSummary() {
   }
 
   function handlePrint() {
-    printRows(buildAllVepariSummaryRows(rows), buildAllVepariSummaryPdfColumns(), 'Vepari Dakhla — All veparis')
+    printRows(
+      buildAllVepariSummaryRows(visibleRows),
+      buildAllVepariSummaryPdfColumns(),
+      'Vepari Dakhla — All veparis',
+    )
   }
 
   function exportOne(row, format) {
@@ -329,7 +367,11 @@ function AllVepariSummary() {
   }
 
   function printOne(row) {
-    printRows(buildAllVepariSummaryRows([row]), buildAllVepariSummaryPdfColumns(), `Vepari Dakhla — ${row.vepari.name}`)
+    printRows(
+      buildAllVepariSummaryRows([row]),
+      buildAllVepariSummaryPdfColumns(),
+      `Vepari Dakhla — ${row.vepari.name}`,
+    )
   }
 
   const columns = [
@@ -381,7 +423,7 @@ function AllVepariSummary() {
       ) : (
         <DataTable
           columns={columns}
-          rows={rows}
+          rows={visibleRows}
           rowKey={(row) => vepariStableId(row.vepari) || row.vepari.id}
           selectedKey={selectedId}
           onRowClick={(row) => {
@@ -389,9 +431,12 @@ function AllVepariSummary() {
             setSelectedId((cur) => (String(cur) === String(id) ? null : id))
           }}
           empty={<p className="text-body text-ink-muted">{t('dakhla.noSummary')}</p>}
-          meta={t('common.showingCount', { count: formatDigits(rows.length) })}
+          meta={t('common.showingCount', { count: formatDigits(visibleRows.length) })}
           toolbar={
             <TableToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder={t('dakhla.searchPlaceholder')}
               actions={
                 <>
                   <input
@@ -408,7 +453,7 @@ function AllVepariSummary() {
                     aria-label={t('common.to')}
                     className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
                   />
-                  {rows.length > 0 && (
+                  {visibleRows.length > 0 && (
                     <>
                       <PrintButton onClick={handlePrint} />
                       <ExportMenu

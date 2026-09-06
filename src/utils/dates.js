@@ -30,6 +30,24 @@ export function formatDateKey(date) {
   return format(date, 'yyyy-MM-dd')
 }
 
+// Storage / sorting stay YYYY-MM-DD; UI + prints show DD-MM-YYYY.
+export function formatDisplayDate(dateKey) {
+  if (dateKey == null || dateKey === '') return ''
+  const raw = String(dateKey).trim()
+  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) return raw
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`
+  // Date range with en-dash (print headers)
+  if (raw.includes('–')) {
+    return raw
+      .split(/\s*–\s*/)
+      .map((part) => formatDisplayDate(part.trim()))
+      .filter(Boolean)
+      .join(' – ')
+  }
+  return raw
+}
+
 // Financial year: 01/04–30/03 (prd.md §4.6, architecture.md §4).
 export function financialYearBounds(dateKey = todayKeyIST()) {
   const [year, month] = dateKey.split('-').map(Number)

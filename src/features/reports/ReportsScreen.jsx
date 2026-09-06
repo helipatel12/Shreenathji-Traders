@@ -38,7 +38,7 @@ function Metric({ label, value }) {
 }
 
 export default function ReportsScreen() {
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { business } = useBusiness()
   const fy = useMemo(() => financialYearBounds(todayKeyIST()), [])
   const [fromDate, setFromDate] = useState(fy.start)
@@ -209,7 +209,7 @@ export default function ReportsScreen() {
       header: t('bills.dateLabel'),
       filter: dateSortFilter(t, sortKey, sortDir, setDateSort),
       render: (row) => (
-        <span className="font-numeric whitespace-nowrap">{formatDigits(row.bill.date)}</span>
+        <span className="font-numeric whitespace-nowrap">{formatDate(row.bill.date)}</span>
       ),
     },
     {
@@ -320,7 +320,7 @@ export default function ReportsScreen() {
       render: (row) => (
         <div>
           <p className="font-semibold">{row.bill.farmerName}</p>
-          <p className="text-caption text-ink-muted">{formatDigits(row.bill.date)}</p>
+          <p className="text-caption text-ink-muted">{formatDate(row.bill.date)}</p>
         </div>
       ),
     },

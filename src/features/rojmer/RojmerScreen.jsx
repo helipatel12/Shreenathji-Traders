@@ -10,7 +10,7 @@
 // balance.
 
 import { useMemo, useState } from 'react'
-import { Pencil, Ban } from 'lucide-react'
+import { Plus, Pencil, Ban } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useBills } from '../../hooks/useBills'
 import { usePayments } from '../../hooks/usePayments'
@@ -26,13 +26,14 @@ import PrintButton from '../../components/PrintButton'
 import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
+import SearchableSelect from '../../components/SearchableSelect'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printBill } from '../bills/billPrint'
 import { buildRojmerRows, buildRojmerPdfColumns } from './rojmerExport'
 
 function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoidPayment }) {
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const billPayments = payments.filter(
     (p) => p.billId === bill.firestoreId && !p.isVoided,
   )
@@ -45,7 +46,7 @@ function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoid
         <li key={payment.id} className="flex items-center justify-between text-caption gap-2">
           <span className="text-ink">
             {formatCurrency(payment.amount)} · {t(`rojmer.${payment.type}`)} ·{' '}
-            {formatDigits(payment.date)}
+            {formatDate(payment.date)}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
             )}
@@ -123,7 +124,7 @@ function VoidConfirmDialog({ onConfirm, onCancel }) {
 
 export default function RojmerScreen() {
   const { user, canWrite, isOwner } = useAuth()
-  const { t, formatCurrency, formatDigits } = useLocale()
+  const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { bills, loading: billsLoading } = useBills()
   const { payments, loading: paymentsLoading, addPayment, updatePayment, voidPayment } = usePayments()
   const { veparis } = useVeparis()
@@ -137,6 +138,8 @@ export default function RojmerScreen() {
   const [statusFilter, setStatusFilter] = useState('')
   const [sortKey, setSortKey] = useState('entryNumber')
   const [sortDir, setSortDir] = useState('asc')
+  const [addingPayment, setAddingPayment] = useState(false)
+  const [manualBillId, setManualBillId] = useState('')
 
   const loading = billsLoading || paymentsLoading
 
@@ -145,6 +148,23 @@ export default function RojmerScreen() {
       .map((bill) => ({ bill, ...getBillClearingInfo(bill, payments) }))
       .sort((a, b) => (a.bill.date < b.bill.date ? 1 : a.bill.date > b.bill.date ? -1 : 0))
   }, [bills, payments])
+
+  const pendingRows = useMemo(() => allRows.filter((r) => !r.isCleared), [allRows])
+
+  const pendingBillOptions = useMemo(
+    () =>
+      pendingRows.map((r) => ({
+        value: String(r.bill.id),
+        label: `${r.bill.entryNumber} · ${r.bill.farmerName} · ${vepariDisplayName(veparis, r.bill.vepariId)} · ${formatCurrency(r.balance)}`,
+        searchText: `${r.bill.entryNumber} ${r.bill.farmerName} ${r.bill.farmerVillage || ''} ${vepariDisplayName(veparis, r.bill.vepariId)}`,
+      })),
+    [pendingRows, veparis, formatCurrency],
+  )
+
+  const manualRow = useMemo(
+    () => pendingRows.find((r) => String(r.bill.id) === String(manualBillId)) || null,
+    [pendingRows, manualBillId],
+  )
 
   const filteredRows = useMemo(() => {
     let rows = allRows
@@ -185,6 +205,30 @@ export default function RojmerScreen() {
 
   async function handleAddPayment(billLocalId, billFirestoreId, maxAmount, values) {
     await addPayment({ billId: billFirestoreId, ...values, createdBy: user?.email })
+    setAddingPayment(false)
+    setManualBillId('')
+  }
+
+  async function handleManualAddPayment(values) {
+    if (!manualRow) return
+    await handleAddPayment(
+      manualRow.bill.id,
+      manualRow.bill.firestoreId,
+      manualRow.balance,
+      values,
+    )
+  }
+
+  function openAddPayment() {
+    setAddingPayment(true)
+    setEditingPayment(null)
+    setExpandedBillId(null)
+    setManualBillId('')
+  }
+
+  function cancelAddPayment() {
+    setAddingPayment(false)
+    setManualBillId('')
   }
 
   async function handleUpdatePayment(values) {
@@ -242,7 +286,7 @@ export default function RojmerScreen() {
       header: t('bills.dateLabel'),
       filter: dateSortFilter(t, sortKey, sortDir, setDateSort),
       render: (row) => (
-        <span className="font-numeric whitespace-nowrap">{formatDigits(row.bill.date)}</span>
+        <span className="font-numeric whitespace-nowrap">{formatDate(row.bill.date)}</span>
       ),
     },
     {
@@ -328,8 +372,67 @@ export default function RojmerScreen() {
     <div>
       {!canWrite && <ReadOnlyBanner />}
 
-      <h1 className="page-title">{t('rojmer.title')}</h1>
-      <p className="text-body text-ink-muted mt-1 mb-4">{t('nav.rojmer')}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 className="page-title">{t('rojmer.title')}</h1>
+          <p className="text-body text-ink-muted mt-1">{t('nav.rojmer')}</p>
+        </div>
+        {canWrite && !addingPayment && (
+          <button type="button" onClick={openAddPayment} className="btn-primary">
+            <Plus size={18} strokeWidth={2} />
+            {t('rojmer.recordPayment')}
+          </button>
+        )}
+      </div>
+
+      {addingPayment && canWrite && (
+        <div className="card px-5 py-5 mb-4 space-y-4">
+          <div>
+            <label className="block text-caption text-ink-muted mb-1.5">
+              {t('rojmer.selectBillLabel')}
+            </label>
+            <SearchableSelect
+              options={pendingBillOptions}
+              value={manualBillId}
+              onChange={setManualBillId}
+              allowEmpty
+              emptyLabel="—"
+              placeholder={t('rojmer.selectBillPlaceholder')}
+              searchPlaceholder={t('rojmer.searchPlaceholder')}
+              aria-label={t('rojmer.selectBillLabel')}
+            />
+            {pendingBillOptions.length === 0 && (
+              <p className="text-caption text-ink-muted mt-2">{t('rojmer.noPending')}</p>
+            )}
+          </div>
+          {manualRow ? (
+            <div className="space-y-3">
+              <p className="text-caption text-ink-muted">
+                {t('rojmer.balanceLabel')}:{' '}
+                <span className="font-semibold text-danger">
+                  {formatCurrency(manualRow.balance)}
+                </span>
+              </p>
+              <PaymentForm
+                maxAmount={manualRow.balance}
+                onSubmit={handleManualAddPayment}
+                onCancel={cancelAddPayment}
+                submitLabel={t('rojmer.savePayment')}
+              />
+            </div>
+          ) : (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={cancelAddPayment}
+                className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted"
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-1 mb-4 border-b border-border">
         {[
@@ -399,7 +502,7 @@ export default function RojmerScreen() {
             <div className="space-y-4">
               {row.isCleared && (
                 <p className="text-caption text-success">
-                  {t('rojmer.clearedBadge')} · {formatDigits(row.clearingDate)}
+                  {t('rojmer.clearedBadge')} · {formatDate(row.clearingDate)}
                 </p>
               )}
               <BillPayments

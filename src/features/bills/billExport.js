@@ -5,6 +5,7 @@
 
 import { formatCurrency } from '../../utils/calc'
 import { vepariDisplayName } from '../../utils/vepari'
+import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
 
 const entryNumberLabel = gu.bills.entryNumberLabel
@@ -14,7 +15,7 @@ export function buildSingleBillRows(bill, vepariName) {
     [entryNumberLabel]: bill.entryNumber,
     Farmer: bill.farmerName,
     Village: bill.farmerVillage,
-    Date: bill.date,
+    Date: formatDisplayDate(bill.date),
     Vepari: vepariName,
     Goods: item.type,
     'Weight (kg)': item.weightKg,
@@ -49,7 +50,7 @@ export function buildBillListRows(bills, veparis) {
     [entryNumberLabel]: bill.entryNumber,
     Farmer: bill.farmerName,
     Village: bill.farmerVillage,
-    Date: bill.date,
+    Date: formatDisplayDate(bill.date),
     Vepari: vepariDisplayName(veparis, bill.vepariId),
     'Line items': bill.items.length,
     Total: formatCurrency(bill.totalAmount),

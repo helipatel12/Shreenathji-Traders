@@ -10,7 +10,7 @@ import {
   dedupeTableByFirestoreId,
 } from '../utils/syncHelpers'
 
-const EDITABLE_FIELDS = ['farmerName', 'farmerVillage', 'vepariId', 'date', 'items']
+const EDITABLE_FIELDS = ['entryNumber', 'farmerName', 'farmerVillage', 'vepariId', 'date', 'items']
 
 /**
  * Next નોંધ નં. = lowest free positive integer among active (non-voided) bills.
@@ -28,6 +28,19 @@ async function nextEntryNumber() {
   let n = 1
   while (used.has(n)) n += 1
   return n
+}
+
+/** True if another active bill already uses this note number. */
+async function isEntryNumberTaken(entryNumber, exceptLocalId) {
+  const n = Number(entryNumber)
+  if (!Number.isFinite(n) || n <= 0) return true
+  const rows = await localDb.bills.toArray()
+  return rows.some(
+    (row) =>
+      row.id !== exceptLocalId &&
+      !row.isVoided &&
+      Number(row.entryNumber) === n,
+  )
 }
 
 /**
@@ -108,8 +121,22 @@ export function useBills() {
     }
   }, [refreshLocal])
 
-  async function addBill({ farmerName, farmerVillage, vepariId, date, items, createdBy, locationId }) {
-    const entryNumber = await nextEntryNumber()
+  async function addBill({
+    farmerName,
+    farmerVillage,
+    vepariId,
+    date,
+    items,
+    createdBy,
+    locationId,
+    entryNumber: requestedEntry,
+  }) {
+    let entryNumber = Number(requestedEntry)
+    if (!Number.isFinite(entryNumber) || entryNumber <= 0) {
+      entryNumber = await nextEntryNumber()
+    } else if (await isEntryNumberTaken(entryNumber)) {
+      throw new Error('ENTRY_NUMBER_TAKEN')
+    }
     const payload = {
       farmerName: farmerName.trim(),
       farmerVillage: farmerVillage.trim(),
@@ -144,8 +171,19 @@ export function useBills() {
     const existing = await localDb.bills.get(localId)
     if (!existing) return
 
-    // નોંધ નં. is immutable after create — strip any accidental change.
-    const { entryNumber: _ignoreEntry, ...safeChanges } = changes || {}
+    const safeChanges = { ...(changes || {}) }
+    if (safeChanges.entryNumber != null && safeChanges.entryNumber !== '') {
+      const next = Number(safeChanges.entryNumber)
+      if (!Number.isFinite(next) || next <= 0) {
+        throw new Error('ENTRY_NUMBER_INVALID')
+      }
+      if (await isEntryNumberTaken(next, localId)) {
+        throw new Error('ENTRY_NUMBER_TAKEN')
+      }
+      safeChanges.entryNumber = next
+    } else {
+      delete safeChanges.entryNumber
+    }
 
     const newValues = { ...existing, ...safeChanges }
     if (safeChanges.items) {

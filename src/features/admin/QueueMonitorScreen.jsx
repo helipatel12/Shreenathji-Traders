@@ -9,7 +9,7 @@ import { SkeletonTable } from '../../components/Skeleton'
 
 export default function QueueMonitorScreen() {
   const { isOwner } = useAuth()
-  const { t } = useLocale()
+  const { t, formatDate } = useLocale()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -118,7 +118,7 @@ export default function QueueMonitorScreen() {
     {
       key: 'date',
       header: t('bills.dateLabel'),
-      render: (row) => <span className="font-numeric">{row.date || '—'}</span>,
+      render: (row) => <span className="font-numeric">{row.date ? formatDate(row.date) : '—'}</span>,
     },
     {
       key: 'status',
