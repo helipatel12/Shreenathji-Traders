@@ -1,8 +1,7 @@
 // Print a vepari દાખલો matching the paper pad (portrait, red grid,
-// રૂા./પૈસા columns). Opens a self-contained print window with the
-// embedded Gujarati font — same approach as billPrint.js.
+// રૂા./પૈસા columns, કુલ રકમ Total box). Opens a self-contained print
+// window with the embedded Gujarati font — same approach as billPrint.js.
 
-import { formatCurrency } from '../../utils/calc'
 import { toGujaratiDigits } from '../../utils/numbers'
 import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
@@ -16,14 +15,31 @@ function esc(value) {
   )
 }
 
+const rupeesFormatter = new Intl.NumberFormat('en-IN', {
+  maximumFractionDigits: 0,
+  minimumFractionDigits: 0,
+})
+
+const amountFormatter = new Intl.NumberFormat('en-IN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
 function splitRupeesPaise(amount) {
   const n = Number(amount) || 0
   const rounded = Math.round((n + Number.EPSILON) * 100) / 100
   const rupees = Math.floor(rounded)
   const paise = Math.round((rounded - rupees) * 100)
-  const rupeesStr = toGujaratiDigits(formatCurrency(rupees).replace(/^₹\s?/, ''))
+  const rupeesStr = toGujaratiDigits(rupeesFormatter.format(rupees))
   const paiseStr = toGujaratiDigits(String(paise).padStart(2, '0'))
   return { rupeesStr, paiseStr }
+}
+
+/** Full amount for the paper "કુલ રકમ Total" box — one decimal only. */
+function formatTotalAmount(amount) {
+  const n = Number(amount) || 0
+  const rounded = Math.round((n + Number.EPSILON) * 100) / 100
+  return toGujaratiDigits(amountFormatter.format(rounded))
 }
 
 function formatKg(weightKg) {
@@ -66,11 +82,11 @@ function buildGoodsRows(lines) {
 
 function chargeRow(label, amount) {
   const { rupeesStr, paiseStr } = splitRupeesPaise(amount)
+  // Paper pad stacks charge amounts in the price columns; label sits
+  // lightly in the left area for clarity on the digital print.
   return `
     <tr class="charge-row">
-      <td class="name" colspan="3">${esc(label)}</td>
-      <td class="num"></td>
-      <td class="num"></td>
+      <td class="charge-label" colspan="5">${esc(label)}</td>
       <td class="num">${esc(rupeesStr)}</td>
       <td class="num">${esc(paiseStr)}</td>
     </tr>`
@@ -90,10 +106,11 @@ function buildTableBody(lines, totals) {
     chargeRow(P.shesColumnLabel, totals.shes),
     chargeRow(P.commissionColumnLabel, totals.commission),
   ]
-  const minBody = 14
-  const filled = goodsRows.length + chargeRows.length
-  const blanks = []
-  for (let i = filled; i < minBody; i += 1) blanks.push(blankRow())
+  // Paper pad is a tall empty grid — fill enough blank lines after goods
+  // so charges sit near the bottom of the sheet.
+  const minBody = 16
+  const blanksNeeded = Math.max(0, minBody - goodsRows.length - chargeRows.length)
+  const blanks = Array.from({ length: blanksNeeded }, blankRow)
 
   return [...goodsRows, ...blanks, ...chargeRows].join('')
 }
@@ -131,7 +148,7 @@ async function loadGujaratiFontFace() {
   }
 }
 
-function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
+function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace, logoUrl }) {
   const businessName = business?.name || gu.common.businessNameGu
   const ownerLine = business?.ownerName
     ? `${P.proprietorPrefix} ${esc(business.ownerName)}`
@@ -149,7 +166,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     : ''
   const printDate = resolvePrintDate(lines)
   const serial = resolveSerial(lines)
-  const totalSplit = splitRupeesPaise(grandTotal)
+  const totalAmountStr = formatTotalAmount(grandTotal)
 
   return `<!doctype html>
 <html lang="gu">
@@ -170,7 +187,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     width: 100%;
     max-width: 780px;
     margin: 0 auto;
-    padding: 8px 10px;
+    padding: 8px 10px 10px;
     border: 2.5px solid #c62828;
     color: #c62828;
     min-height: 100vh;
@@ -178,46 +195,68 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     display: flex;
     flex-direction: column;
   }
-  .sheet-body { flex: 1 1 auto; display: flex; flex-direction: column; }
-  table.dakhla { width: 100%; flex: 1 1 auto; }
+  .sheet-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+  }
   .top-meta {
     display: grid;
-    grid-template-columns: 1fr 1.4fr 1fr;
+    grid-template-columns: 1fr 1.5fr 1fr;
     gap: 6px;
     align-items: start;
     font-size: 11px;
     margin-bottom: 2px;
   }
-  .top-meta .left { text-align: left; line-height: 1.35; }
+  .top-meta .left {
+    text-align: left;
+    line-height: 1.3;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
   .top-meta .center { text-align: center; line-height: 1.35; }
   .top-meta .right { text-align: right; line-height: 1.4; }
+  .logo {
+    width: 52px;
+    height: 52px;
+    object-fit: contain;
+  }
+  .serial {
+    font-size: 20px;
+    font-weight: 800;
+    color: #c62828;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
   .invocation { font-weight: 700; font-size: 12px; }
-  .apmc { font-size: 11px; margin-top: 2px; }
+  .apmc { font-size: 10.5px; margin-top: 2px; }
   .dakhla-tag {
     display: inline-block;
     margin-top: 4px;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 800;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
   }
   .header {
     text-align: center;
-    margin: 2px 0 6px;
+    margin: 2px 0 4px;
     position: relative;
   }
   .header h1 {
     margin: 0;
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 800;
     color: #c62828;
     letter-spacing: 0.02em;
   }
-  .header .owner { font-size: 13px; font-weight: 700; margin-top: 2px; }
-  .header .address { font-size: 11.5px; margin-top: 2px; }
+  .header .owner { font-size: 13px; font-weight: 700; margin-top: 2px; color: #c62828; }
+  .header .address { font-size: 11.5px; margin-top: 2px; color: #c62828; }
   .license-pill {
     position: absolute;
     right: 0;
-    top: 4px;
+    top: 6px;
     border: 1.5px solid #c62828;
     border-radius: 999px;
     padding: 3px 10px;
@@ -225,6 +264,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     font-weight: 700;
     max-width: 42%;
     line-height: 1.25;
+    color: #c62828;
   }
   .note-line {
     text-align: center;
@@ -234,6 +274,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     border-bottom: 1.5px solid #c62828;
     padding: 4px 4px;
     margin: 6px 0 8px;
+    color: #c62828;
   }
   .party {
     display: grid;
@@ -243,7 +284,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     margin-bottom: 8px;
     align-items: end;
   }
-  .party .label { font-weight: 700; white-space: nowrap; }
+  .party .label { font-weight: 700; white-space: nowrap; color: #c62828; }
   .party .value {
     border-bottom: 1.25px solid #c62828;
     min-height: 18px;
@@ -257,26 +298,27 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     grid-column: 1 / -1;
     align-items: end;
   }
-  .serial {
-    font-size: 22px;
-    font-weight: 800;
-    color: #c62828;
-    margin: 0 0 4px 2px;
-    letter-spacing: 0.02em;
-  }
   table.dakhla {
     width: 100%;
     border-collapse: collapse;
     font-size: 12.5px;
+    flex: 1 1 auto;
   }
+  table.dakhla col.c-name { width: 22%; }
+  table.dakhla col.c-village { width: 14%; }
+  table.dakhla col.c-goods { width: 12%; }
+  table.dakhla col.c-kg { width: 10%; }
+  table.dakhla col.c-rate { width: 10%; }
+  table.dakhla col.c-rs { width: 18%; }
+  table.dakhla col.c-ps { width: 8%; }
   table.dakhla th, table.dakhla td {
     border: 1.5px solid #c62828;
-    padding: 4px 5px;
+    padding: 3px 5px;
     color: #111;
     vertical-align: middle;
   }
   table.dakhla th {
-    background: #fff5f5;
+    background: #fff;
     color: #c62828;
     font-weight: 700;
     text-align: center;
@@ -287,33 +329,63 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     font-variant-numeric: tabular-nums;
   }
   table.dakhla td.name, table.dakhla td.goods { text-align: left; }
-  table.dakhla tbody tr.blank td { height: 24px; }
+  table.dakhla tbody tr.blank td { height: 22px; }
   table.dakhla tbody tr.charge-row td {
     color: #111;
     font-weight: 600;
   }
+  table.dakhla tbody tr.charge-row td.charge-label {
+    text-align: right;
+    padding-right: 10px;
+    color: #c62828;
+    font-weight: 700;
+    font-size: 11.5px;
+  }
   .footer {
     display: grid;
-    grid-template-columns: 1.2fr 0.9fr;
-    gap: 12px;
-    margin-top: auto;
+    grid-template-columns: 1fr minmax(160px, 28%);
+    gap: 10px 14px;
+    margin-top: 0;
+    align-items: stretch;
+  }
+  .footer-left {
     padding-top: 8px;
-    align-items: end;
   }
   .instructions {
     font-size: 11px;
-    color: #333;
-    line-height: 1.45;
+    color: #1565c0;
+    line-height: 1.5;
   }
-  .instructions .title { font-weight: 700; color: #c62828; margin-bottom: 2px; }
+  .instructions .title {
+    font-weight: 700;
+    color: #1565c0;
+    margin-bottom: 2px;
+  }
+  .eoe {
+    margin-top: 10px;
+    font-size: 11px;
+    color: #333;
+  }
   .total-box {
     border: 2px solid #c62828;
-    padding: 8px 10px;
-    text-align: right;
+    border-top: none;
+    padding: 8px 10px 10px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 72px;
+    margin-top: -1.5px;
   }
   .total-box .label {
     font-size: 13px;
     font-weight: 800;
+    color: #c62828;
+    line-height: 1.25;
+  }
+  .total-box .label-en {
+    font-size: 12px;
+    font-weight: 700;
     color: #c62828;
     margin-bottom: 4px;
   }
@@ -322,11 +394,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     font-weight: 800;
     color: #111;
     font-variant-numeric: tabular-nums;
-  }
-  .eoe {
-    margin-top: 8px;
-    font-size: 11px;
-    color: #333;
+    letter-spacing: 0.01em;
   }
   .print-bar {
     max-width: 780px;
@@ -361,7 +429,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
       page-break-after: avoid;
     }
     table.dakhla { height: 100%; }
-    table.dakhla tbody tr.blank td { height: 26px; }
+    table.dakhla tbody tr.blank td { height: 24px; }
     @page {
       size: A4 portrait;
       margin: 0;
@@ -375,7 +443,8 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     <div class="sheet-body">
     <div class="top-meta">
       <div class="left">
-        ${licenseLine ? `<div>${licenseLine}</div>` : '&nbsp;'}
+        ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" alt="" />` : ''}
+        ${serial ? `<div class="serial">${esc(toGujaratiDigits(serial))}</div>` : ''}
       </div>
       <div class="center">
         <div class="invocation">${esc(P.invocationLine)}</div>
@@ -408,9 +477,16 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
       </div>
     </div>
 
-    ${serial ? `<div class="serial">${esc(toGujaratiDigits(serial))}</div>` : ''}
-
     <table class="dakhla">
+      <colgroup>
+        <col class="c-name" />
+        <col class="c-village" />
+        <col class="c-goods" />
+        <col class="c-kg" />
+        <col class="c-rate" />
+        <col class="c-rs" />
+        <col class="c-ps" />
+      </colgroup>
       <thead>
         <tr>
           <th rowspan="2">${esc(P.farmerNameColumnLabel)}</th>
@@ -432,7 +508,7 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
     </div>
 
     <div class="footer">
-      <div>
+      <div class="footer-left">
         <div class="instructions">
           <div class="title">${esc(P.instructionsTitle)}</div>
           <div>${esc(P.instruction1)}</div>
@@ -441,8 +517,9 @@ function buildHtml({ vepari, lines, totals, grandTotal, business, fontFace }) {
         <div class="eoe">${esc(P.eoeLine)}</div>
       </div>
       <div class="total-box">
-        <div class="label">${esc(P.totalLabel)} Total</div>
-        <div class="amount">${esc(totalSplit.rupeesStr)}.${esc(totalSplit.paiseStr)}</div>
+        <div class="label">${esc(P.totalLabel)}</div>
+        <div class="label-en">Total</div>
+        <div class="amount">${esc(totalAmountStr)}</div>
       </div>
     </div>
   </div>
@@ -466,6 +543,8 @@ export function printDakhla(vepari, lines, grandTotal, { business, totals }) {
     total: grandTotal,
   }
 
+  const logoUrl = `${window.location.origin}/icons/logo_full_ink_transparent.png`
+
   loadGujaratiFontFace().then((fontFace) => {
     const html = buildHtml({
       vepari,
@@ -474,6 +553,7 @@ export function printDakhla(vepari, lines, grandTotal, { business, totals }) {
       grandTotal,
       business,
       fontFace,
+      logoUrl,
     })
     printWindow.document.open()
     printWindow.document.write(html)

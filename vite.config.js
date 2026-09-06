@@ -13,8 +13,8 @@ export default defineConfig({
       includeAssets: ['icons/favicon.png'],
       manifest: {
         id: '/',
-        name: 'Shreenath Traders',
-        short_name: 'Shreenath',
+        name: 'Shreenathji Traders',
+        short_name: 'Shreenathji',
         description:
           'Bill entry, vepari dakhla, rojmer and jansa silak — one connected ledger.',
         lang: 'gu',

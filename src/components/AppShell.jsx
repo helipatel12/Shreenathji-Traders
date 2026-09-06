@@ -25,12 +25,12 @@ const SIDEBAR_KEY = 'st_sidebar_collapsed'
 
 function navClass({ isActive }, collapsed) {
   return [
-    'flex items-center gap-3 min-h-11 rounded-xl text-sm font-medium transition-colors',
-    collapsed ? 'justify-center px-2' : 'px-3',
-    isActive
-      ? 'bg-accent-soft text-accent font-semibold'
-      : 'text-ink-muted hover:bg-sidebar-hover hover:text-ink',
-  ].join(' ')
+    'sidebar-link group',
+    collapsed ? 'is-collapsed' : '',
+    isActive ? 'is-active' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 function mobileTabClass({ isActive }) {
@@ -38,6 +38,14 @@ function mobileTabClass({ isActive }) {
     'flex flex-col items-center justify-center gap-1 min-h-14 min-w-12 px-2 py-1',
     isActive ? 'text-accent' : 'text-ink-muted',
   ].join(' ')
+}
+
+function NavLabel({ children, collapsed }) {
+  return (
+    <span className={`sidebar-label ${collapsed ? 'is-hidden' : ''}`} aria-hidden={collapsed}>
+      {children}
+    </span>
+  )
 }
 
 export default function AppShell() {
@@ -100,12 +108,12 @@ export default function AppShell() {
     <div className="min-h-svh bg-surface-muted text-ink md:flex">
       <aside
         className={[
-          'hidden md:flex md:flex-col md:shrink-0 bg-surface border-r border-border',
+          'sidebar-rail hidden md:flex md:flex-col md:shrink-0',
           'h-svh sticky top-0 overflow-hidden',
-          collapsed ? 'md:w-[4.5rem]' : 'md:w-60',
+          collapsed ? 'is-collapsed' : 'is-expanded',
         ].join(' ')}
       >
-        <div className={`px-3 pt-5 pb-4 border-b border-border ${collapsed ? 'px-2' : 'px-4'}`}>
+        <div className="sidebar-brand shrink-0">
           <div className={`flex items-center gap-2.5 ${collapsed ? 'justify-center' : ''}`}>
             <img
               src={collapsed ? '/icons/icon-192.png' : '/icons/logo_full_ink_transparent.png'}
@@ -117,17 +125,11 @@ export default function AppShell() {
               }
             />
           </div>
-          {!collapsed && (
-            <p className="text-[11px] text-ink-muted mt-2 truncate">{panelLabel}</p>
-          )}
+          <p className={`sidebar-panel-label ${collapsed ? 'is-hidden' : ''}`}>{panelLabel}</p>
         </div>
 
-        <nav className="flex flex-col gap-1 px-2 py-4 flex-1 overflow-hidden">
-          {!collapsed && (
-            <p className="px-3 mb-1 text-[10px] uppercase tracking-wider text-ink-muted font-semibold">
-              {t('nav.main')}
-            </p>
-          )}
+        <nav className="sidebar-nav flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-2 py-3">
+          <p className={`sidebar-section ${collapsed ? 'is-hidden' : ''}`}>{t('nav.main')}</p>
           {mainTabs.map(({ to, label, Icon, end }) => (
             <NavLink
               key={to}
@@ -136,8 +138,8 @@ export default function AppShell() {
               title={label}
               className={(args) => navClass(args, collapsed)}
             >
-              <Icon size={18} strokeWidth={1.75} />
-              {!collapsed && label}
+              <Icon size={18} strokeWidth={1.75} className="sidebar-icon" />
+              <NavLabel collapsed={collapsed}>{label}</NavLabel>
             </NavLink>
           ))}
 
@@ -146,17 +148,15 @@ export default function AppShell() {
             title={reportTab.label}
             className={(args) => navClass(args, collapsed)}
           >
-            <FileBarChart2 size={18} strokeWidth={1.75} />
-            {!collapsed && reportTab.label}
+            <FileBarChart2 size={18} strokeWidth={1.75} className="sidebar-icon" />
+            <NavLabel collapsed={collapsed}>{reportTab.label}</NavLabel>
           </NavLink>
 
           {isOwner && (
             <>
-              {!collapsed && (
-                <p className="px-3 mt-4 mb-1 text-[10px] uppercase tracking-wider text-ink-muted font-semibold">
-                  {t('nav.admin')}
-                </p>
-              )}
+              <p className={`sidebar-section mt-3 ${collapsed ? 'is-hidden' : ''}`}>
+                {t('nav.admin')}
+              </p>
               {adminTabs.map(({ to, label, Icon }) => (
                 <NavLink
                   key={to}
@@ -164,39 +164,34 @@ export default function AppShell() {
                   title={label}
                   className={(args) => navClass(args, collapsed)}
                 >
-                  <Icon size={18} strokeWidth={1.75} />
-                  {!collapsed && label}
+                  <Icon size={18} strokeWidth={1.75} className="sidebar-icon" />
+                  <NavLabel collapsed={collapsed}>{label}</NavLabel>
                 </NavLink>
               ))}
             </>
           )}
+        </nav>
 
-          {!collapsed && (
-            <p className="px-3 mt-4 mb-1 text-[10px] uppercase tracking-wider text-ink-muted font-semibold">
-              {t('nav.account')}
-            </p>
-          )}
+        {/* Settings + collapse stay pinned — never clipped by nav overflow */}
+        <div className="sidebar-footer shrink-0">
+          <p className={`sidebar-section ${collapsed ? 'is-hidden' : ''}`}>{t('nav.account')}</p>
           <NavLink
             to="/settings"
             title={t('nav.settings')}
             className={(args) => navClass(args, collapsed)}
           >
-            <Settings size={18} strokeWidth={1.75} />
-            {!collapsed && t('nav.settings')}
+            <Settings size={18} strokeWidth={1.75} className="sidebar-icon" />
+            <NavLabel collapsed={collapsed}>{t('nav.settings')}</NavLabel>
           </NavLink>
-        </nav>
 
-        <div className="px-2 pb-4 pt-2 border-t border-border shrink-0">
           <button
             type="button"
             onClick={() => setCollapsed((v) => !v)}
-            className="w-full min-h-11 rounded-xl border border-border text-ink-muted hover:text-ink hover:bg-sidebar-hover inline-flex items-center justify-center gap-2"
+            className={`sidebar-collapse-btn ${collapsed ? 'is-collapsed' : ''}`}
             aria-label={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
           >
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-            {!collapsed && (
-              <span className="text-caption font-medium">{t('nav.collapseSidebar')}</span>
-            )}
+            <NavLabel collapsed={collapsed}>{t('nav.collapseSidebar')}</NavLabel>
           </button>
         </div>
       </aside>

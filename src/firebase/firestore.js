@@ -157,7 +157,7 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
   if (!business && !businessDefinitelyExists) {
     const batch = writeBatch(db)
     batch.set(businessRef(), {
-      name: 'Shreenath Traders',
+      name: 'Shreenathji Traders',
       financialYearStart: '04-01',
       createdAt: serverTimestamp(),
     })

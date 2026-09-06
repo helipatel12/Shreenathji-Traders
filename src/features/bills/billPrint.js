@@ -1,7 +1,6 @@
 // Print a single bill as a કેશ મેમો matching the paper memo pad.
 // Labels stay Gujarati (paper format). Opens a self-contained print window.
 
-import { formatCurrency } from '../../utils/calc'
 import { toGujaratiDigits } from '../../utils/numbers'
 import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
@@ -22,12 +21,17 @@ function formatWeight(weightKg) {
   return toGujaratiDigits(raw)
 }
 
+const rupeesFormatter = new Intl.NumberFormat('en-IN', {
+  maximumFractionDigits: 0,
+  minimumFractionDigits: 0,
+})
+
 function splitRupeesPaise(amount) {
   const n = Number(amount) || 0
   const rounded = Math.round((n + Number.EPSILON) * 100) / 100
   const rupees = Math.floor(rounded)
   const paise = Math.round((rounded - rupees) * 100)
-  const rupeesStr = toGujaratiDigits(formatCurrency(rupees).replace(/^₹\s?/, ''))
+  const rupeesStr = toGujaratiDigits(rupeesFormatter.format(rupees))
   const paiseStr = toGujaratiDigits(String(paise).padStart(2, '0'))
   return { rupeesStr, paiseStr }
 }

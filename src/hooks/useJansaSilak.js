@@ -26,9 +26,31 @@ import { useMemo } from 'react'
 import { useBills } from './useBills'
 import { usePayments } from './usePayments'
 import { useSilakEntries } from './useSilakEntries'
-import { computeSilakDay, excludeVoided } from '../utils/calc'
+import { useVeparis } from './useVeparis'
+import { useBusiness } from './useBusiness'
+import {
+  computeSilakDay,
+  excludeVoided,
+  resolveRates,
+  computeDakhlaLine,
+  sumDakhlaLines,
+  roundCurrency,
+} from '../utils/calc'
+import { findVepari } from '../utils/vepari'
 import { eachDateKeyInRange } from '../utils/dates'
 import gu from '../locales/gu.json'
+
+function computeDayFeeTotals(dayBills, veparis, business) {
+  const lines = dayBills.map((bill) => {
+    const vepari = findVepari(veparis, bill.vepariId)
+    return computeDakhlaLine(bill, resolveRates(vepari, business))
+  })
+  const fees = sumDakhlaLines(lines)
+  return {
+    commissionTotal: fees.commission,
+    shesTolaiTotal: roundCurrency(fees.shes + fees.tolai),
+  }
+}
 
 function useAllSilakEntries() {
   const { bills: allBills, loading: billsLoading } = useBills()
@@ -40,6 +62,8 @@ function useAllSilakEntries() {
     updateEntry,
     deleteEntry,
   } = useSilakEntries()
+  const { veparis, loading: veparisLoading } = useVeparis()
+  const { business, loading: businessLoading } = useBusiness()
 
   // A voided bill never contributes જમા, and a payment recorded
   // against a bill that's since been voided shouldn't contribute
@@ -80,8 +104,11 @@ function useAllSilakEntries() {
 
   return {
     allEntries,
+    bills,
+    veparis,
+    business,
     earliestDate,
-    loading: billsLoading || paymentsLoading || manualLoading,
+    loading: billsLoading || paymentsLoading || manualLoading || veparisLoading || businessLoading,
     addEntry,
     updateEntry,
     deleteEntry,
@@ -91,7 +118,17 @@ function useAllSilakEntries() {
 // One day's detail — entries, opening balance (rolled forward from
 // the earliest activity date), totals, closing balance.
 export function useJansaSilak(selectedDate) {
-  const { allEntries, earliestDate, loading, addEntry, updateEntry, deleteEntry } = useAllSilakEntries()
+  const {
+    allEntries,
+    bills,
+    veparis,
+    business,
+    earliestDate,
+    loading,
+    addEntry,
+    updateEntry,
+    deleteEntry,
+  } = useAllSilakEntries()
 
   const day = useMemo(() => {
     if (!selectedDate) return null
@@ -103,6 +140,8 @@ export function useJansaSilak(selectedDate) {
       const dayEntries = allEntries.filter((e) => e.date === dateKey)
       const { jamaTotal, udharTotal, closingBalance } = computeSilakDay(dayEntries, runningBalance)
       if (dateKey === selectedDate) {
+        const dayBills = bills.filter((b) => b.date === dateKey)
+        const fees = computeDayFeeTotals(dayBills, veparis, business)
         result = {
           date: dateKey,
           entries: dayEntries.sort((a, b) => (a.key < b.key ? -1 : 1)),
@@ -110,12 +149,13 @@ export function useJansaSilak(selectedDate) {
           jamaTotal,
           udharTotal,
           closingBalance,
+          ...fees,
         }
       }
       runningBalance = closingBalance
     }
     return result
-  }, [allEntries, earliestDate, selectedDate])
+  }, [allEntries, bills, veparis, business, earliestDate, selectedDate])
 
   return { loading, day, addEntry, updateEntry, deleteEntry }
 }
@@ -123,10 +163,12 @@ export function useJansaSilak(selectedDate) {
 // A range of days (monthly/yearly export, phases.md Phase 7) — same
 // rollover math, one summary row per day in [fromDate, toDate].
 export function useJansaSilakRange(fromDate, toDate) {
-  const { allEntries, earliestDate, loading } = useAllSilakEntries()
+  const { allEntries, bills, veparis, business, earliestDate, loading } = useAllSilakEntries()
 
-  const days = useMemo(() => {
-    if (!fromDate || !toDate) return []
+  const { days, rangeFees } = useMemo(() => {
+    if (!fromDate || !toDate) {
+      return { days: [], rangeFees: { commissionTotal: 0, shesTolaiTotal: 0 } }
+    }
     const startDate = earliestDate && earliestDate < fromDate ? earliestDate : fromDate
     const dateKeys = eachDateKeyInRange(startDate, toDate)
 
@@ -140,22 +182,32 @@ export function useJansaSilakRange(fromDate, toDate) {
 
     let runningBalance = 0
     const results = []
+    let commissionTotal = 0
+    let shesTolaiTotal = 0
     for (const dateKey of dateKeys) {
       const dayEntries = byDate.get(dateKey) || []
       const { jamaTotal, udharTotal, closingBalance } = computeSilakDay(dayEntries, runningBalance)
       if (dateKey >= fromDate) {
+        const dayBills = bills.filter((b) => b.date === dateKey)
+        const fees = computeDayFeeTotals(dayBills, veparis, business)
+        commissionTotal = roundCurrency(commissionTotal + fees.commissionTotal)
+        shesTolaiTotal = roundCurrency(shesTolaiTotal + fees.shesTolaiTotal)
         results.push({
           date: dateKey,
           openingBalance: runningBalance,
           jamaTotal,
           udharTotal,
           closingBalance,
+          ...fees,
         })
       }
       runningBalance = closingBalance
     }
-    return results
-  }, [allEntries, earliestDate, fromDate, toDate])
+    return {
+      days: results,
+      rangeFees: { commissionTotal, shesTolaiTotal },
+    }
+  }, [allEntries, bills, veparis, business, earliestDate, fromDate, toDate])
 
-  return { loading, days }
+  return { loading, days, rangeFees }
 }

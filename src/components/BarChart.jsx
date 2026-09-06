@@ -20,7 +20,7 @@ export default function BarChart({
   const padL = 12
   const padR = 12
   const padT = 14
-  const padB = 48
+  const padB = series.length >= 10 ? 36 : 48
   const hasSecondary = series.some((p) => p.value2 != null)
   const values = series.flatMap((p) => [p.value || 0, hasSecondary ? p.value2 || 0 : 0])
   const max = Math.max(...values, 1)
@@ -43,6 +43,9 @@ export default function BarChart({
     }
   }
 
+  const showAllLabels = series.length <= labelCount
+  const labelFontSize = series.length >= 12 ? 10 : series.length > 14 ? 10 : 11
+
   return (
     <div className="w-full overflow-hidden">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="img">
@@ -62,11 +65,28 @@ export default function BarChart({
         })}
         {series.map((p, i) => {
           const cx = padL + i * slot + slot / 2
-          const h1 = ((p.value || 0) / max) * (height - padT - padB)
-          const x1 = hasSecondary ? cx - barW - gap / 2 : cx - barW / 2
+          const v1 = p.value || 0
+          const v2 = hasSecondary ? p.value2 || 0 : 0
+          const draw1 = v1 > 0
+          const draw2 = v2 > 0
+          const both = draw1 && draw2
+          // One bar → center on the tick; both → pair centered on the tick.
+          const groupW = barW * 2 + gap
+          let x1
+          let x2
+          if (both) {
+            x1 = cx - groupW / 2
+            x2 = cx - groupW / 2 + barW + gap
+          } else if (draw1) {
+            x1 = cx - barW / 2
+            x2 = cx - barW / 2
+          } else {
+            x1 = cx - barW / 2
+            x2 = cx - barW / 2
+          }
+          const h1 = (v1 / max) * (height - padT - padB)
+          const h2 = (v2 / max) * (height - padT - padB)
           const y1 = height - padB - h1
-          const h2 = hasSecondary ? ((p.value2 || 0) / max) * (height - padT - padB) : 0
-          const x2 = cx + gap / 2
           const y2 = height - padB - h2
           const showLabel = labelIdx.has(i)
           return (
@@ -76,15 +96,17 @@ export default function BarChart({
                 {formatValue ? ` · ${formatValue(p.value)}` : ''}
                 {hasSecondary && formatValue ? ` / ${formatValue(p.value2 || 0)}` : ''}
               </title>
-              <rect
-                x={x1}
-                y={y1}
-                width={Math.max(barW, 2)}
-                height={Math.max(h1, 0)}
-                rx="3"
-                fill={barColor}
-              />
-              {hasSecondary && (
+              {draw1 && (
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={Math.max(barW, 2)}
+                  height={Math.max(h1, 0)}
+                  rx="3"
+                  fill={barColor}
+                />
+              )}
+              {draw2 && (
                 <rect
                   x={x2}
                   y={y2}
@@ -93,17 +115,6 @@ export default function BarChart({
                   rx="3"
                   fill={barColorSecondary}
                 />
-              )}
-              {showLabel && (
-                <text
-                  x={cx}
-                  y={height - 18}
-                  textAnchor="middle"
-                  fill="var(--color-ink-muted)"
-                  style={{ fontSize: series.length > 14 ? 10 : 11, fontWeight: 600 }}
-                >
-                  {p.label}
-                </text>
               )}
               {showLabel && (
                 <line
@@ -115,18 +126,31 @@ export default function BarChart({
                   strokeWidth="1"
                 />
               )}
+              {showLabel && (
+                <text
+                  x={cx}
+                  y={height - 12}
+                  textAnchor="middle"
+                  fill="var(--color-ink-muted)"
+                  style={{ fontSize: labelFontSize, fontWeight: 600 }}
+                >
+                  {p.label}
+                </text>
+              )}
             </g>
           )
         })}
       </svg>
-      <div className="flex justify-between px-1 -mt-1">
-        <span className="text-[11px] font-semibold text-ink-muted font-numeric">
-          {series[0]?.label}
-        </span>
-        <span className="text-[11px] font-semibold text-ink-muted font-numeric">
-          {series[series.length - 1]?.label}
-        </span>
-      </div>
+      {!showAllLabels && (
+        <div className="flex justify-between px-1 -mt-1">
+          <span className="text-[11px] font-semibold text-ink-muted font-numeric">
+            {series[0]?.label}
+          </span>
+          <span className="text-[11px] font-semibold text-ink-muted font-numeric">
+            {series[series.length - 1]?.label}
+          </span>
+        </div>
+      )}
       {formatValue && series.length > 0 && (
         <p className="sr-only">
           {series.map((p) => `${p.label}: ${formatValue(p.value)}`).join(', ')}

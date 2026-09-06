@@ -97,8 +97,8 @@ export default function DashboardScreen() {
   const clearedShare =
     incomeTotal > 0 ? Math.min(100, Math.round(((incomeTotal - expenseTotal) / incomeTotal) * 100)) : 0
 
-  // 7d / 1m / 6m / 1y: show every bucket label (≤12). Custom long spans stay sparse.
-  const maxLabels = chartSeries.length <= 12 ? Math.max(chartSeries.length, 1) : 8
+  // Presets stay fully labeled (7d/1m/6m/1y ≤ ~13 buckets). Longer custom spans stay sparse.
+  const maxLabels = chartSeries.length <= 14 ? Math.max(chartSeries.length, 1) : 8
 
   return (
     <div>

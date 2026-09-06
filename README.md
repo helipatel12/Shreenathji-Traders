@@ -1,4 +1,4 @@
-# Shreenath Traders Management
+# Shreenathji Traders Management
 
 Offline-first digital ledger for **Shreenathji Traders** — an agricultural commission agent (આડતીયા) business in Tarapur.
 

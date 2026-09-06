@@ -278,11 +278,25 @@ function DayView() {
             )}
           />
 
-          <div className="card px-4 py-3 mt-3 flex items-center justify-between bg-accent-soft">
-            <p className="text-body text-ink font-semibold">{t('silak.closingLabel')}</p>
-            <p className="font-numeric text-heading text-ink font-semibold">
-              {formatCurrency(day.closingBalance)}
-            </p>
+          <div className="card px-4 py-3 mt-3 bg-accent-soft space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-body text-ink-muted">{t('silak.commissionTotalLabel')}</p>
+              <p className="font-numeric text-body text-ink font-semibold">
+                {formatCurrency(day.commissionTotal)}
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-body text-ink-muted">{t('silak.shesTolaiTotalLabel')}</p>
+              <p className="font-numeric text-body text-ink font-semibold">
+                {formatCurrency(day.shesTolaiTotal)}
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">
+              <p className="text-body text-ink font-semibold">{t('silak.closingLabel')}</p>
+              <p className="font-numeric text-heading text-ink font-semibold">
+                {formatCurrency(day.closingBalance)}
+              </p>
+            </div>
           </div>
         </>
       )}
@@ -322,7 +336,7 @@ function RangeView({ mode }) {
   const [toDate, setToDate] = useState(bounds.end)
   const [selectedDate, setSelectedDate] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
-  const { loading, days } = useJansaSilakRange(fromDate, toDate)
+  const { loading, days, rangeFees } = useJansaSilakRange(fromDate, toDate)
 
   const sortedDays = useMemo(() => {
     const dir = sortDir === 'desc' ? -1 : 1
@@ -428,57 +442,81 @@ function RangeView({ mode }) {
       {loading ? (
         <SkeletonTable rows={5} cols={5} />
       ) : (
-        <DataTable
-          columns={columns}
-          rows={sortedDays}
-          rowKey="date"
-          selectedKey={selectedDate}
-          onRowClick={(day) =>
-            setSelectedDate((d) => (d === day.date ? null : day.date))
-          }
-          empty={<p className="text-body text-ink-muted">{t('silak.noRangeEntries')}</p>}
-          meta={t('common.showingCount', { count: formatDigits(sortedDays.length) })}
-          toolbar={
-            <TableToolbar
-              actions={
-                <>
-                  <input
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                    aria-label={t('common.from')}
-                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
-                  />
-                  <input
-                    type="date"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                    aria-label={t('common.to')}
-                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
-                  />
-                  {sortedDays.length > 0 && (
-                    <>
-                      <PrintButton onClick={handlePrint} />
-                      <ExportMenu
-                        label={t('silak.exportRange', { count: sortedDays.length })}
-                        onExportExcel={() => doExport('excel')}
-                        onExportCSV={() => doExport('csv')}
-                        onExportPDF={() => doExport('pdf')}
-                      />
-                    </>
-                  )}
-                </>
-              }
-            />
-          }
-          renderExpanded={(day) => (
-            <p className="text-body text-ink-muted">
-              {formatDate(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
-              {t('silak.udharLabel')} {formatCurrency(day.udharTotal)} ·{' '}
-              {t('silak.closingLabel')} {formatCurrency(day.closingBalance)}
-            </p>
+        <>
+          <DataTable
+            columns={columns}
+            rows={sortedDays}
+            rowKey="date"
+            selectedKey={selectedDate}
+            onRowClick={(day) =>
+              setSelectedDate((d) => (d === day.date ? null : day.date))
+            }
+            empty={<p className="text-body text-ink-muted">{t('silak.noRangeEntries')}</p>}
+            meta={t('common.showingCount', { count: formatDigits(sortedDays.length) })}
+            toolbar={
+              <TableToolbar
+                actions={
+                  <>
+                    <input
+                      type="date"
+                      value={fromDate}
+                      onChange={(e) => setFromDate(e.target.value)}
+                      aria-label={t('common.from')}
+                      className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                    />
+                    <input
+                      type="date"
+                      value={toDate}
+                      onChange={(e) => setToDate(e.target.value)}
+                      aria-label={t('common.to')}
+                      className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
+                    />
+                    {sortedDays.length > 0 && (
+                      <>
+                        <PrintButton onClick={handlePrint} />
+                        <ExportMenu
+                          label={t('silak.exportRange', { count: sortedDays.length })}
+                          onExportExcel={() => doExport('excel')}
+                          onExportCSV={() => doExport('csv')}
+                          onExportPDF={() => doExport('pdf')}
+                        />
+                      </>
+                    )}
+                  </>
+                }
+              />
+            }
+            renderExpanded={(day) => (
+              <p className="text-body text-ink-muted">
+                {formatDate(day.date)}: {t('silak.jamaLabel')} {formatCurrency(day.jamaTotal)} ·{' '}
+                {t('silak.udharLabel')} {formatCurrency(day.udharTotal)} ·{' '}
+                {t('silak.closingLabel')} {formatCurrency(day.closingBalance)}
+              </p>
+            )}
+          />
+          {sortedDays.length > 0 && (
+            <div className="card px-4 py-3 mt-3 bg-accent-soft space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-body text-ink-muted">{t('silak.commissionTotalLabel')}</p>
+                <p className="font-numeric text-body text-ink font-semibold">
+                  {formatCurrency(rangeFees.commissionTotal)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-body text-ink-muted">{t('silak.shesTolaiTotalLabel')}</p>
+                <p className="font-numeric text-body text-ink font-semibold">
+                  {formatCurrency(rangeFees.shesTolaiTotal)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">
+                <p className="text-body text-ink font-semibold">{t('silak.closingLabel')}</p>
+                <p className="font-numeric text-heading text-ink font-semibold">
+                  {formatCurrency(days[days.length - 1]?.closingBalance || 0)}
+                </p>
+              </div>
+            </div>
           )}
-        />
+        </>
       )}
     </div>
   )

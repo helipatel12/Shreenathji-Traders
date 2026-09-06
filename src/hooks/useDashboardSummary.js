@@ -66,9 +66,11 @@ function labelDay(dateKey) {
   return `${d}-${m}`
 }
 
-function labelMonth(dateKey) {
+function labelMonth(dateKey, { includeYear = false } = {}) {
   const [y, m] = dateKey.split('-')
-  return `${MONTH_SHORT[Number(m) - 1]} ${y.slice(2)}`
+  const name = MONTH_SHORT[Number(m) - 1] || m
+  if (!includeYear) return name
+  return `${name} ${y.slice(2)}`
 }
 
 function labelWeek(dates) {
@@ -119,10 +121,13 @@ function buildChartBuckets(from, to, bucketMode) {
   }
 
   const byMonth = new Map()
+  // 1y (and similar ~12-month spans): month name only — year digits clutter the axis.
+  // Longer custom ranges keep a short year so repeated months stay distinct.
+  const includeYear = days.length > 400
   for (const date of days) {
     const key = date.slice(0, 7)
     if (!byMonth.has(key)) {
-      byMonth.set(key, { key, label: labelMonth(date), dates: [] })
+      byMonth.set(key, { key, label: labelMonth(date, { includeYear }), dates: [] })
     }
     byMonth.get(key).dates.push(date)
   }
