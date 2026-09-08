@@ -42,11 +42,19 @@ export function billToFormValues(bill) {
   }
 }
 
-export default function BillForm({ initialValues, onSubmit, onCancel, submitLabel, readOnly = false }) {
+export default function BillForm({
+  initialValues,
+  onSubmit,
+  onCancel,
+  submitLabel,
+  readOnly = false,
+  canEditEntryNumber = false,
+}) {
   const { t, formatCurrency } = useLocale()
   const { veparis } = useVeparis()
   const goodsLabels = t('bills.goodsTypes')
   const isEdit = initialValues?.entryNumber != null && initialValues.entryNumber !== ''
+  const entryNumberEditable = !isEdit || canEditEntryNumber
 
   const schema = useMemo(
     () =>
@@ -153,16 +161,21 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
       }
     })
     if (items.some((i) => !i.type)) return
-    const entryNumber = Number.isFinite(values.entryNumber) ? values.entryNumber : undefined
     try {
-      await onSubmit({
-        entryNumber,
+      const payload = {
         farmerName: values.farmerName,
         farmerVillage: values.farmerVillage,
         vepariId: vepari ? vepariStableId(vepari) : values.vepariId,
         date: values.date,
         items,
-      })
+      }
+      // Create: optional manual/auto number. Edit: only owner may send a change.
+      if (!isEdit) {
+        payload.entryNumber = Number.isFinite(values.entryNumber) ? values.entryNumber : undefined
+      } else if (canEditEntryNumber && Number.isFinite(values.entryNumber)) {
+        payload.entryNumber = values.entryNumber
+      }
+      await onSubmit(payload)
     } catch (err) {
       if (err?.message === 'ENTRY_NUMBER_TAKEN') {
         setError('entryNumber', { message: t('bills.entryNumberTaken') })
@@ -183,16 +196,32 @@ export default function BillForm({ initialValues, onSubmit, onCancel, submitLabe
             <input
               id="entryNumber"
               inputMode="numeric"
-              className={inputClasses}
+              className={`${inputClasses}${!entryNumberEditable ? ' bg-surface-muted text-ink-muted' : ''}`}
               placeholder={isEdit ? undefined : t('bills.entryNumberAuto')}
+              readOnly={!entryNumberEditable}
+              aria-readonly={!entryNumberEditable}
+              title={
+                isEdit && !canEditEntryNumber
+                  ? t('bills.entryNumberLocked')
+                  : isEdit && canEditEntryNumber
+                    ? t('bills.entryNumberAdminOnly')
+                    : undefined
+              }
               {...register('entryNumber', {
                 onChange: (e) => {
+                  if (!entryNumberEditable) return
                   setValue('entryNumber', convertIndicDigits(e.target.value), {
                     shouldValidate: true,
                   })
                 },
               })}
             />
+            {isEdit && !canEditEntryNumber && (
+              <p className="text-caption text-ink-muted mt-1">{t('bills.entryNumberLocked')}</p>
+            )}
+            {isEdit && canEditEntryNumber && (
+              <p className="text-caption text-ink-muted mt-1">{t('bills.entryNumberAdminOnly')}</p>
+            )}
             {errors.entryNumber && (
               <p className="text-caption text-danger mt-1">{errors.entryNumber.message}</p>
             )}

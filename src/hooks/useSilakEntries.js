@@ -37,7 +37,10 @@ export function useSilakEntries() {
       async (snapshot) => {
         const gen = ++generation
         const isCurrent = () => !cancelled && gen === generation
-        await applyCollectionSnapshot(localDb.silakEntries, snapshot, { isCurrent })
+        await applyCollectionSnapshot(localDb.silakEntries, snapshot, {
+          isCurrent,
+          abandonPendingIfMissing: true,
+        })
         if (isCurrent()) await refreshLocal()
       },
       (err) => {

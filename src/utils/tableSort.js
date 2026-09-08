@@ -22,8 +22,9 @@ export function sortByNoteOrDate(list, { sortKey = 'entryNumber', sortDir = 'asc
 }
 
 export function noteSortFilter(t, sortKey, sortDir, setNoteSort) {
+  const active = sortKey === 'entryNumber' || sortKey === 'dakhlaNumber'
   return {
-    value: sortKey === 'entryNumber' ? sortDir : '',
+    value: active ? sortDir : '',
     onChange: setNoteSort,
     allLabel: t('bills.sortNote'),
     options: [

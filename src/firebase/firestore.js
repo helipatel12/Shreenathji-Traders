@@ -3,7 +3,7 @@
 // its collection(s) — see phases.md. Phase 1 adds the business/user
 // helpers needed for login; later phases add bills/payments/etc.
 
-import { collection, doc, getDoc, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDoc, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
 import { db } from './config'
 
 // This app is single-business per deployment — prd.md and
@@ -77,6 +77,16 @@ export function paymentDocRef(paymentId) {
   return doc(db, 'businesses', BUSINESS_ID, 'payments', paymentId)
 }
 
+// Vepari settlement payments — mirror of farmer payments / Rojmer:
+// businesses/{businessId}/vepariPayments/{paymentId}
+export function vepariPaymentCollectionRef() {
+  return collection(db, 'businesses', BUSINESS_ID, 'vepariPayments')
+}
+
+export function vepariPaymentDocRef(paymentId) {
+  return doc(db, 'businesses', BUSINESS_ID, 'vepariPayments', paymentId)
+}
+
 // Manual silak entries only (Phase 7) — architecture.md §4:
 // businesses/{businessId}/silakEntries/{entryId}. Auto (bill/payment
 // -derived) entries are never stored here — see useJansaSilak.js.
@@ -86,6 +96,57 @@ export function silakEntryCollectionRef() {
 
 export function silakEntryDocRef(entryId) {
   return doc(db, 'businesses', BUSINESS_ID, 'silakEntries', entryId)
+}
+
+export function entryNumberCounterRef() {
+  return doc(db, 'businesses', BUSINESS_ID, 'counters', 'entryNumber')
+}
+
+export function dakhlaNumberCounterRef() {
+  return doc(db, 'businesses', BUSINESS_ID, 'counters', 'dakhlaNumber')
+}
+
+/**
+ * Atomically allocate the next નોંધ નં. when online.
+ * @param {number} [minNext=1] — never allocate below this (usually max local + 1)
+ */
+export async function allocateEntryNumberRemote(minNext = 1) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null
+  const floor = Math.max(1, Number(minNext) || 1)
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const ref = entryNumberCounterRef()
+      const snap = await transaction.get(ref)
+      const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
+      const next = Math.max(stored, floor)
+      transaction.set(ref, { next: next + 1 }, { merge: true })
+      return next
+    })
+  } catch (err) {
+    console.error('Remote entryNumber allocate failed — using local:', err)
+    return null
+  }
+}
+
+/**
+ * Atomically allocate the next દાખલા નં. when online.
+ */
+export async function allocateDakhlaNumberRemote(minNext = 1) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null
+  const floor = Math.max(1, Number(minNext) || 1)
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const ref = dakhlaNumberCounterRef()
+      const snap = await transaction.get(ref)
+      const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
+      const next = Math.max(stored, floor)
+      transaction.set(ref, { next: next + 1 }, { merge: true })
+      return next
+    })
+  } catch (err) {
+    console.error('Remote dakhlaNumber allocate failed — using local:', err)
+    return null
+  }
 }
 
 export async function getBusiness() {
@@ -131,6 +192,16 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
   const normalizedEmail = String(email || '').trim().toLowerCase()
   const existingUser = await getUserRecord(uid)
   if (existingUser) {
+    if (existingUser.role === 'owner') {
+      try {
+        const business = await getBusiness()
+        if (business && !business.ownerUid) {
+          await setDoc(businessRef(), { ownerUid: uid }, { merge: true })
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     if (displayName && displayName !== existingUser.name) {
       await setDoc(userRef(uid), { name: displayName }, { merge: true })
       return { user: { ...existingUser, name: displayName }, status: 'existing' }
@@ -139,7 +210,11 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
   }
 
   // New membership (owner bootstrap / invite) requires a verified mailbox.
+  // Phone-only accounts cannot match email invites (M10).
   if (!emailVerified) {
+    if (phone && !normalizedEmail) {
+      return { user: null, status: 'unauthorized', reason: 'phone-needs-email' }
+    }
     return { user: null, status: 'unverified' }
   }
 
@@ -165,6 +240,7 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
       name: 'Shreenathji Traders',
       financialYearStart: '04-01',
       createdByUid: uid,
+      ownerUid: uid,
       createdAt: serverTimestamp(),
     })
     const newUser = {
@@ -180,8 +256,11 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
     return { user: { id: uid, ...newUser }, status: 'created-owner' }
   }
 
-  // Orphan business (created without user doc) — claim if we stamped createdByUid.
-  if (business?.createdByUid === uid && normalizedEmail) {
+  // Orphan business (created without user doc) — reclaim only if ownerUid
+  // still points at this uid (H6). Legacy docs without ownerUid fall back
+  // to createdByUid.
+  const ownerUid = business?.ownerUid || business?.createdByUid
+  if (business && ownerUid === uid && normalizedEmail) {
     const newUser = {
       email: normalizedEmail,
       phone: phone || '',
@@ -191,6 +270,13 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
       createdAt: serverTimestamp(),
     }
     await setDoc(userRef(uid), newUser)
+    if (!business.ownerUid) {
+      try {
+        await setDoc(businessRef(), { ownerUid: uid }, { merge: true })
+      } catch {
+        /* ignore — may need membership first */
+      }
+    }
     return { user: { id: uid, ...newUser }, status: 'created-owner' }
   }
 

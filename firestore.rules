@@ -100,10 +100,11 @@ service cloud.firestore {
       allow update: if isOwner(businessId) &&
         request.resource.data.createdByUid == resource.data.createdByUid;
       allow delete: if isOwner(businessId);
-      // Bootstrap: verified email + stamp createdByUid (reduces open-signup hijack).
+      // Bootstrap: verified email + stamp createdByUid/ownerUid.
       allow create: if isEmailVerified() &&
         !businessExists(businessId) &&
-        request.resource.data.createdByUid == request.auth.uid;
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.ownerUid == request.auth.uid;
 
       match /users/{userId} {
         allow get: if isSignedIn() && (request.auth.uid == userId || isMember(businessId));
@@ -124,11 +125,14 @@ service cloud.firestore {
             request.resource.data.role == 'owner' &&
             request.resource.data.keys().hasAll(['email', 'role']) &&
             request.resource.data.email == authEmailLower()) ||
-          // Claim owner if you created an orphan business doc.
+          // Reclaim own orphan membership only while ownerUid (or legacy
+          // createdByUid) still points at you (H6).
           (isEmailVerified() &&
             request.auth.uid == userId &&
             businessExists(businessId) &&
             businessData(businessId).createdByUid == request.auth.uid &&
+            businessData(businessId).get('ownerUid', businessData(businessId).createdByUid)
+              == request.auth.uid &&
             request.resource.data.role == 'owner' &&
             request.resource.data.keys().hasAll(['email', 'role']) &&
             request.resource.data.email == authEmailLower()) ||
@@ -173,11 +177,27 @@ service cloud.firestore {
         allow create: if isStaffOrOwner(businessId) &&
           isNonNegNumber(request.resource.data.totalAmount) &&
           request.resource.data.date is string &&
+          request.resource.data.items is list &&
           request.resource.data.keys().hasAll(['date', 'totalAmount', 'items']) &&
           request.resource.data.get('isVoided', false) == false;
         allow update: if isStaffOrOwner(businessId) &&
           (isVoidingUnchanged() || isOwner(businessId)) &&
-          isNonNegNumber(request.resource.data.totalAmount);
+          isNonNegNumber(request.resource.data.totalAmount) &&
+          request.resource.data.date is string &&
+          request.resource.data.items is list &&
+          // નોંધ નં. / દાખલા નં. never change on staff updates; owner may change manually.
+          (
+            !('entryNumber' in resource.data) ||
+            resource.data.entryNumber == null ||
+            request.resource.data.entryNumber == resource.data.entryNumber ||
+            isOwner(businessId)
+          ) &&
+          (
+            !('dakhlaNumber' in resource.data) ||
+            resource.data.dakhlaNumber == null ||
+            request.resource.data.dakhlaNumber == resource.data.dakhlaNumber ||
+            isOwner(businessId)
+          );
         allow delete: if false;
       }
 
@@ -188,9 +208,37 @@ service cloud.firestore {
           request.resource.data.billId is string &&
           request.resource.data.date is string &&
           request.resource.data.get('isVoided', false) == false;
+        // billId is immutable after create (H7) — prevents re-pointing money.
         allow update: if isStaffOrOwner(businessId) &&
           (isVoidingUnchanged() || isOwner(businessId)) &&
-          isPositiveNumber(request.resource.data.amount);
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.billId == resource.data.billId &&
+          request.resource.data.date is string;
+        allow delete: if false;
+      }
+
+      // Vepari settlement — same shape/rules as farmer payments (Rojmer).
+      match /vepariPayments/{paymentId} {
+        allow read: if isMember(businessId);
+        allow create: if isStaffOrOwner(businessId) &&
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.billId is string &&
+          request.resource.data.date is string &&
+          request.resource.data.get('isVoided', false) == false;
+        allow update: if isStaffOrOwner(businessId) &&
+          (isVoidingUnchanged() || isOwner(businessId)) &&
+          isPositiveNumber(request.resource.data.amount) &&
+          request.resource.data.billId == resource.data.billId &&
+          request.resource.data.date is string;
+        allow delete: if false;
+      }
+
+      match /counters/{counterId} {
+        allow read: if isMember(businessId);
+        allow create, update: if isStaffOrOwner(businessId) &&
+          counterId in ['entryNumber', 'dakhlaNumber'] &&
+          request.resource.data.keys().hasAll(['next']) &&
+          isPositiveNumber(request.resource.data.next);
         allow delete: if false;
       }
 

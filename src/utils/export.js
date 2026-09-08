@@ -16,8 +16,10 @@ function downloadBlob(blob, filename) {
 function sanitizeCell(value) {
   if (value == null) return ''
   if (typeof value === 'number' || typeof value === 'boolean') return value
-  const s = String(value)
-  if (/^[=+\-@]/.test(s)) return `'${s}`
+  let s = String(value)
+  // Strip leading whitespace/control chars Excel may treat as formula markers (L2).
+  s = s.replace(/^[\s\u0000-\u001f]+/, '')
+  if (/^[=+\-@\t\r]/.test(s)) return `'${s}`
   return s
 }
 
@@ -108,10 +110,22 @@ export async function exportRowsToPDF(rows, columns, filename, title) {
 }
 
 export async function printRows(rows, columns, title) {
-  const doc = await buildPdfDoc(rows, columns, title)
-  const blobUrl = doc.output('bloburl')
-  const win = window.open(blobUrl, '_blank')
-  if (!win) {
-    window.alert('Pop-up blocked — allow pop-ups to print, or use Export PDF instead.')
+  // Open synchronously while we still have the user gesture (H3).
+  const win = window.open('about:blank', '_blank')
+  try {
+    const doc = await buildPdfDoc(rows, columns, title)
+    const blobUrl = doc.output('bloburl')
+    if (win) {
+      win.location.href = blobUrl
+    } else {
+      window.alert('Pop-up blocked — allow pop-ups to print, or use Export PDF instead.')
+    }
+  } catch (err) {
+    try {
+      win?.close()
+    } catch {
+      /* ignore */
+    }
+    throw err
   }
 }

@@ -19,6 +19,12 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 **Currently working on**: — ready for owner local test (`npm run dev`)
 **Blocked on**: owner must validate Jansa Silak જમા/ઉધાર against paper ledger; Phase 11 offline multi-device trial.
 
+**Owner domain map (2026-09-08):**
+- **Bills** = buy goods from khedut/farmer
+- **Dakhla** = sell goods to vepari (what vepari owes)
+- **Rojmer** = payment settlement for khedut/farmer only
+- **Vepari pay** (`/vepari-pay`) = payment settlement for vepari (same UX as Rojmer; balance = dakhla line total)
+
 ## Completed
 
 - 2026-07-21 — Vite + React scaffold created (`npm create vite@latest -- --template react`).
@@ -110,7 +116,8 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 
 Only items that still need the **owner** (code-side issues from the old list were audited and cleared 2026-09-05).
 
-- **Jansa Silak જમા/ઉધાર vs paper ledger** — still the only real business-logic open question. App treats જમા = bill amounts, ઉધાર = rojmer payments (see `useJansaSilak.js` header). Compare one known paper day; if paper means something else (e.g. cash collected from veparis), that needs a new feature, not a formula tweak.
+- **Jansa Silak જમા/ઉધાર vs paper ledger** — still needs owner validation against paper. Current auto formula uses fees + khedut pending + cheques (jama) and dakhla totals (udhar); vepari collections exist now but are **not** wired into silak until owner says so.
+- 2026-09-08 — **Vepari settlement built** (`/vepari-pay`): Rojmer twin against dakhla totals; collection `vepariPayments`; needs `firestore:rules` deploy before cloud writes work. Day-group per vepari. Separate **દાખલા નં.** (`dakhlaNumber`) parallel to farmer નોંધ નં.
 - **Owner smoke tests when convenient** (features are built; these prove them on real data/devices):
   1. Offline bill add/edit → reconnect → reload (Phase 4).
   2. Dakhla line math vs hand calc for one vepari (Phase 5).

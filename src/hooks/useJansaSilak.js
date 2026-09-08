@@ -1,15 +1,10 @@
-// Jansa Silak (daily cash position) — Phase 7. Auto-populated જમા/
-// ઉધાર from bills + vepari dakhla + cleared rojmer payments, plus
-// manual entries, rolled forward day by day (opening = previous closing).
+// Jansa Silak (daily cash position) — Phase 7.
 //
-// Owner-confirmed interpretation (2026-09-06):
-//   જમા (credit)  = each bill's goods amount on the bill date
-//                    + 1 row: that day's total commission
-//                    + 1 row: that day's total shes + tolai
-//   ઉધાર (debit)  = that day's vepari-dakhla totals (કુલ બેસણું, one line per vepari)
-//                    + that day's cleared amounts (non-voided rojmer
-//                    payments on active bills)
-//   Manual entries stay as entered (jama or udhar)
+// Owner-confirmed (2026-09-08):
+//   જમા = day commission + day shes/tolai + khedut pending (rojmer) + cleared cheques
+//   ઉધાર = vepari dakhla (per vepari per day) + manual entries
+//   (Auto cash payments are not in udhar.)
+//   Opening = previous day's closing
 
 import { useMemo } from 'react'
 import { useBills } from './useBills'
@@ -17,18 +12,18 @@ import { usePayments } from './usePayments'
 import { useSilakEntries } from './useSilakEntries'
 import { useVeparis } from './useVeparis'
 import { useBusiness } from './useBusiness'
+import { useLocale } from '../context/LocaleContext'
 import {
   computeSilakDay,
   excludeVoided,
-  isRecordVoided,
   resolveRates,
   computeDakhlaLine,
   sumDakhlaLines,
   roundCurrency,
 } from '../utils/calc'
-import { findVepari, vepariDisplayName, vepariStableId } from '../utils/vepari'
+import { findVepari } from '../utils/vepari'
 import { eachDateKeyInRange } from '../utils/dates'
-import gu from '../locales/gu.json'
+import { buildSilakLedgerEntries } from '../utils/silakLedger'
 
 function computeDayFeeTotals(dayBills, veparis, business) {
   const lines = dayBills.map((bill) => {
@@ -54,118 +49,22 @@ function useAllSilakEntries() {
   } = useSilakEntries()
   const { veparis, loading: veparisLoading } = useVeparis()
   const { business, loading: businessLoading } = useBusiness()
+  const { t } = useLocale()
 
   const bills = useMemo(() => excludeVoided(allBills), [allBills])
 
-  const allEntries = useMemo(() => {
-    const auto = []
-    const activeBillIds = new Set(bills.map((b) => b.firestoreId).filter(Boolean))
-    // One ઉધાર dakhla line per vepari per day; fees are day totals (2 rows).
-    const dakhlaByDateVepari = new Map()
-    const commissionByDate = new Map()
-    const shesTolaiByDate = new Map()
-
-    for (const bill of bills) {
-      if (isRecordVoided(bill) || !bill.date) continue
-      const vepari = findVepari(veparis, bill.vepariId)
-      const line = computeDakhlaLine(bill, resolveRates(vepari, business))
-      const vepariName = vepari?.name || vepariDisplayName(veparis, bill.vepariId) || '—'
-      const vepariKey = vepariStableId(vepari) || String(bill.vepariId || 'unknown')
-      const note = `${gu.bills.entryNumberLabel} ${bill.entryNumber}`
-      const farmer = bill.farmerName || ''
-      const groupKey = `${bill.date}|${vepariKey}`
-
-      // જમા — goods side (farmer / bill)
-      auto.push({
-        date: bill.date,
-        side: 'jama',
-        label: `${note} — ${farmer}`.trim(),
-        amount: line.goodsAmount,
-        isManual: false,
-        key: `jama-${bill.firestoreId || bill.id}`,
-      })
-
-      if (line.commission > 0) {
-        const existing = commissionByDate.get(bill.date)
-        if (existing) {
-          existing.amount = roundCurrency(existing.amount + line.commission)
-        } else {
-          commissionByDate.set(bill.date, {
-            date: bill.date,
-            side: 'jama',
-            label: gu.silak.commissionTotalLabel,
-            amount: line.commission,
-            isManual: false,
-            key: `jama-commission-${bill.date}`,
-          })
-        }
-      }
-
-      const shesTolai = roundCurrency((line.shes || 0) + (line.tolai || 0))
-      if (shesTolai > 0) {
-        const existing = shesTolaiByDate.get(bill.date)
-        if (existing) {
-          existing.amount = roundCurrency(existing.amount + shesTolai)
-        } else {
-          shesTolaiByDate.set(bill.date, {
-            date: bill.date,
-            side: 'jama',
-            label: gu.silak.shesTolaiTotalLabel,
-            amount: shesTolai,
-            isManual: false,
-            key: `jama-shes-tolai-${bill.date}`,
-          })
-        }
-      }
-
-      const existingDakhla = dakhlaByDateVepari.get(groupKey)
-      if (existingDakhla) {
-        existingDakhla.amount = roundCurrency(existingDakhla.amount + (line.total || 0))
-        existingDakhla.billCount += 1
-      } else {
-        dakhlaByDateVepari.set(groupKey, {
-          date: bill.date,
-          side: 'udhar',
-          label: vepariName,
-          amount: line.total || 0,
-          billCount: 1,
-          isManual: false,
-          key: `udhar-dakhla-${bill.date}-${vepariKey}`,
-        })
-      }
-    }
-
-    for (const row of commissionByDate.values()) auto.push(row)
-    for (const row of shesTolaiByDate.values()) auto.push(row)
-
-    for (const row of dakhlaByDateVepari.values()) {
-      if (row.billCount > 1) {
-        row.label = `${row.label} (${row.billCount})`
-      }
-      delete row.billCount
-      auto.push(row)
-    }
-
-    // ઉધાર — cleared amounts (rojmer payments on active bills, by payment date)
-    for (const payment of excludeVoided(payments)) {
-      if (!payment.billId || !activeBillIds.has(payment.billId) || !payment.date) continue
-      const bill = bills.find((b) => b.firestoreId === payment.billId)
-      auto.push({
-        date: payment.date,
-        side: 'udhar',
-        label: `ચુકવણી — ${bill ? bill.farmerName : ''}`.trim(),
-        amount: payment.amount,
-        isManual: false,
-        key: `udhar-cleared-${payment.firestoreId || payment.id}`,
-      })
-    }
-
-    const manual = manualEntries
-      .filter((entry) => !isRecordVoided(entry))
-      .map((entry) => ({ ...entry, key: `manual-${entry.id}` }))
-
-    return [...auto, ...manual]
-  }, [bills, payments, veparis, business, manualEntries])
+  const allEntries = useMemo(
+    () =>
+      buildSilakLedgerEntries({
+        bills,
+        payments,
+        veparis,
+        business,
+        manualEntries,
+        t,
+      }),
+    [bills, payments, veparis, business, manualEntries, t],
+  )
 
   const earliestDate = useMemo(() => {
     const dates = allEntries.map((e) => e.date).filter(Boolean)
@@ -207,17 +106,26 @@ export function useJansaSilak(selectedDate) {
     if (!selectedDate) return null
     const startDate = earliestDate && earliestDate < selectedDate ? earliestDate : selectedDate
     const dateKeys = eachDateKeyInRange(startDate, selectedDate)
+
+    const byDate = new Map()
+    for (const entry of allEntries) {
+      if (!entry?.date) continue
+      const list = byDate.get(entry.date)
+      if (list) list.push(entry)
+      else byDate.set(entry.date, [entry])
+    }
+
     let runningBalance = 0
     let result = null
     for (const dateKey of dateKeys) {
-      const dayEntries = allEntries.filter((e) => e.date === dateKey)
+      const dayEntries = byDate.get(dateKey) || []
       const { jamaTotal, udharTotal, closingBalance } = computeSilakDay(dayEntries, runningBalance)
       if (dateKey === selectedDate) {
         const dayBills = bills.filter((b) => b.date === dateKey)
         const fees = computeDayFeeTotals(dayBills, veparis, business)
         result = {
           date: dateKey,
-          entries: dayEntries.sort((a, b) => (a.key < b.key ? -1 : 1)),
+          entries: dayEntries.slice().sort((a, b) => (a.key < b.key ? -1 : 1)),
           openingBalance: runningBalance,
           jamaTotal,
           udharTotal,

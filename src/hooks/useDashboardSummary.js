@@ -7,6 +7,8 @@ import { useBills } from './useBills'
 import { usePayments } from './usePayments'
 import { useSilakEntries } from './useSilakEntries'
 import { useVeparis } from './useVeparis'
+import { useBusiness } from './useBusiness'
+import { useLocale } from '../context/LocaleContext'
 import {
   getBillBalance,
   roundCurrency,
@@ -15,6 +17,7 @@ import {
 } from '../utils/calc'
 import { todayKeyIST, eachDateKeyInRange } from '../utils/dates'
 import { vepariDisplayName, findVepari } from '../utils/vepari'
+import { buildSilakLedgerEntries } from '../utils/silakLedger'
 
 export const DASHBOARD_PRESETS = [
   { id: '7d', bucket: 'day' },
@@ -140,7 +143,10 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
   const { payments, loading: paymentsLoading } = usePayments()
   const { entries: silakEntries, loading: silakLoading } = useSilakEntries()
   const { veparis, loading: veparisLoading } = useVeparis()
-  const loading = billsLoading || paymentsLoading || silakLoading || veparisLoading
+  const { business, loading: businessLoading } = useBusiness()
+  const { t } = useLocale()
+  const loading =
+    billsLoading || paymentsLoading || silakLoading || veparisLoading || businessLoading
 
   return useMemo(() => {
     const today = todayKeyIST()
@@ -160,19 +166,22 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
       pendingBills.reduce((sum, { balance }) => sum + balance, 0),
     )
 
-    const allSilakEntries = [
-      ...activeBills.map((bill) => ({
-        date: bill.date,
-        side: 'jama',
-        amount: bill.totalAmount,
-      })),
-      ...activePayments.map((payment) => ({
-        date: payment.date,
-        side: 'udhar',
-        amount: payment.amount,
-      })),
-      ...silakEntries.filter((e) => e.isManual),
-    ]
+    const allSilakEntries = buildSilakLedgerEntries({
+      bills: activeBills,
+      payments,
+      veparis,
+      business,
+      manualEntries: silakEntries.filter((e) => e.isManual),
+      t,
+    })
+
+    const byDate = new Map()
+    for (const entry of allSilakEntries) {
+      if (!entry?.date) continue
+      const list = byDate.get(entry.date)
+      if (list) list.push(entry)
+      else byDate.set(entry.date, [entry])
+    }
 
     const dates = allSilakEntries.map((e) => e.date).filter(Boolean)
     const earliest = dates.length ? dates.reduce((min, d) => (d < min ? d : min)) : today
@@ -180,7 +189,7 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
     let running = 0
     let silakPosition = 0
     for (const dateKey of eachDateKeyInRange(startDate, today)) {
-      const dayEntries = allSilakEntries.filter((e) => e.date === dateKey)
+      const dayEntries = byDate.get(dateKey) || []
       const { closingBalance } = computeSilakDay(dayEntries, running)
       if (dateKey === today) silakPosition = closingBalance
       running = closingBalance
@@ -261,7 +270,18 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
       rangeStart: from,
       rangeEnd: to,
     }
-  }, [bills, payments, silakEntries, veparis, loading, fromDate, toDate, bucketMode])
+  }, [
+    bills,
+    payments,
+    silakEntries,
+    veparis,
+    business,
+    loading,
+    fromDate,
+    toDate,
+    bucketMode,
+    t,
+  ])
 }
 
 export function useDashboardRange(defaultPreset = '7d') {

@@ -6,6 +6,7 @@ import {
   BookOpen,
   Wallet,
   Landmark,
+  HandCoins,
   Settings,
   Shield,
   LogOut,
@@ -77,6 +78,7 @@ export default function AppShell() {
     { to: '/', label: t('nav.home'), Icon: Home, end: true },
     { to: '/bills', label: t('nav.bill'), Icon: Receipt },
     { to: '/dakhla', label: t('nav.dakhla'), Icon: BookOpen },
+    { to: '/vepari-pay', label: t('nav.vepariPay'), Icon: HandCoins },
     { to: '/rojmer', label: t('nav.rojmer'), Icon: Wallet },
     { to: '/silak', label: t('nav.silak'), Icon: Landmark },
   ]

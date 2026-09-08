@@ -258,13 +258,13 @@ export default function RojmerScreen() {
     printRows(buildRojmerRows(filteredRows, veparis, payments), buildRojmerPdfColumns(), `Rojmer — ${tab}`)
   }
 
-  function exportOne(row, format) {
+  async function exportOne(row, format) {
     const exportRows = buildRojmerRows([row], veparis, payments)
     const filename = `rojmer_${row.bill.entryNumber}`
     const title = `Rojmer — ${row.bill.entryNumber}`
-    if (format === 'excel') exportRowsToExcel(exportRows, filename, 'Rojmer')
-    if (format === 'csv') exportRowsToCSV(exportRows, filename)
-    if (format === 'pdf') exportRowsToPDF(exportRows, buildRojmerPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(exportRows, filename, 'Rojmer')
+    if (format === 'csv') await exportRowsToCSV(exportRows, filename)
+    if (format === 'pdf') await exportRowsToPDF(exportRows, buildRojmerPdfColumns(), filename, title)
   }
 
   function printOne(row) {

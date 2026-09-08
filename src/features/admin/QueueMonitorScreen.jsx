@@ -24,9 +24,10 @@ export default function QueueMonitorScreen() {
   const [selectedKey, setSelectedKey] = useState(null)
 
   async function loadQueue() {
-    const [bills, payments, silak, veparis] = await Promise.all([
+    const [bills, payments, vepariPayments, silak, veparis] = await Promise.all([
       localDb.bills.toArray(),
       localDb.payments.toArray(),
+      localDb.vepariPayments.toArray(),
       localDb.silakEntries.toArray(),
       localDb.veparis.toArray(),
     ])
@@ -45,6 +46,16 @@ export default function QueueMonitorScreen() {
         key: `payment-${r.id}`,
         type: 'payment',
         label: `${t('rojmer.amountLabel')} ${r.amount}`,
+        date: r.date,
+        detail:
+          r.syncStatus === 'pendingDelete'
+            ? t('admin.pendingDelete')
+            : r.billId || t('admin.localOnly'),
+      })),
+      ...vepariPayments.filter(isQueued).map((r) => ({
+        key: `vepariPayment-${r.id}`,
+        type: 'vepariPayment',
+        label: `${t('vepariPay.amountLabel')} ${r.amount}`,
         date: r.date,
         detail:
           r.syncStatus === 'pendingDelete'
@@ -135,6 +146,7 @@ export default function QueueMonitorScreen() {
         options: [
           { value: 'bill', label: t('admin.type.bill') },
           { value: 'payment', label: t('admin.type.payment') },
+          { value: 'vepariPayment', label: t('admin.type.vepariPayment') },
           { value: 'silak', label: t('admin.type.silak') },
           { value: 'vepari', label: t('admin.type.vepari') },
         ],

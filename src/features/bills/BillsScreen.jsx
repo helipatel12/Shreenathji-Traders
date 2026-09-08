@@ -189,7 +189,7 @@ export default function BillsScreen() {
 
   async function exportSingleBill(bill, format) {
     const name = vepariDisplayName(veparis, bill.vepariId)
-    const filename = `bill_${bill.entryNumber}_${bill.farmerName.replace(/\s+/g, '_')}`
+    const filename = `bill_${bill.entryNumber}_${(bill.farmerName || 'bill').replace(/\s+/g, '_')}`
     const title = `${t('bills.entryNumberLabel')} ${bill.entryNumber} — ${bill.farmerName} (${name})`
     if (format === 'excel') await exportRowsToExcel(buildSingleBillRows(bill, name), filename, 'Bill')
     if (format === 'csv') await exportRowsToCSV(buildSingleBillRows(bill, name), filename)
@@ -364,6 +364,7 @@ export default function BillsScreen() {
             onSubmit={handleUpdate}
             onCancel={() => setMode('list')}
             submitLabel={t('bills.saveChanges')}
+            canEditEntryNumber={isOwner}
           />
           <EditHistoryList editHistory={editingBill.editHistory} />
         </div>

@@ -68,6 +68,92 @@ export function getBillBalance(bill, payments = []) {
   return getBillClearingInfo(bill, payments).balance
 }
 
+/**
+ * Vepari settlement clearing — same algorithm as getBillClearingInfo,
+ * but the obligation is the dakhla line total (goods + tolai + shes +
+ * commission), not bill.totalAmount (farmer goods only).
+ */
+export function getDakhlaClearingInfo(bill, vepariPayments = [], rates) {
+  const line = computeDakhlaLine(bill, rates)
+  const total = line.total || 0
+  const billPayments = excludeVoided(vepariPayments)
+    .filter((p) => p.billId === bill.firestoreId)
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+  let cumulative = 0
+  let clearingDate = null
+  for (const payment of billPayments) {
+    cumulative = roundCurrency(cumulative + (payment.amount || 0))
+    if (clearingDate === null && cumulative >= total - 0.005) {
+      clearingDate = payment.date
+    }
+  }
+  const balance = roundCurrency(total - cumulative)
+  const isCleared = balance <= 0.005
+  return {
+    balance,
+    isCleared,
+    clearingDate: isCleared ? clearingDate : null,
+    totalPaid: cumulative,
+    dakhlaTotal: total,
+    line,
+  }
+}
+
+/**
+ * Split a payment amount across bills FIFO (by entry number / date),
+ * each capped at that bill's remaining dakhla balance.
+ */
+export function allocateVepariPaymentFifo(billLines, amount) {
+  let remaining = roundCurrency(amount || 0)
+  const allocations = []
+  const ordered = (billLines || [])
+    .slice()
+    .sort((a, b) => {
+      const ea = Number(a.bill?.entryNumber) || 0
+      const eb = Number(b.bill?.entryNumber) || 0
+      if (ea !== eb) return ea - eb
+      return String(a.bill?.firestoreId || '').localeCompare(String(b.bill?.firestoreId || ''))
+    })
+  for (const line of ordered) {
+    if (remaining <= 0.005) break
+    const due = roundCurrency(line.balance || 0)
+    if (due <= 0.005) continue
+    const pay = roundCurrency(Math.min(due, remaining))
+    if (pay <= 0.005) continue
+    allocations.push({ billId: line.bill.firestoreId, amount: pay })
+    remaining = roundCurrency(remaining - pay)
+  }
+  return allocations
+}
+
+/**
+ * Aggregate per-bill dakhla clearing into one day-group total.
+ */
+export function summarizeVepariDayClearing(billLines) {
+  let dakhlaTotal = 0
+  let totalPaid = 0
+  let balance = 0
+  let clearingDate = null
+  for (const line of billLines || []) {
+    dakhlaTotal = roundCurrency(dakhlaTotal + (line.dakhlaTotal || 0))
+    totalPaid = roundCurrency(totalPaid + (line.totalPaid || 0))
+    balance = roundCurrency(balance + (line.balance || 0))
+    if (line.isCleared && line.clearingDate) {
+      if (!clearingDate || line.clearingDate > clearingDate) clearingDate = line.clearingDate
+    }
+  }
+  const isCleared = balance <= 0.005
+  return {
+    dakhlaTotal,
+    totalPaid,
+    balance,
+    isCleared,
+    clearingDate: isCleared ? clearingDate : null,
+  }
+}
+
 // Indian digit grouping (₹1,23,456.78), not Western (rules.md §3).
 // en-IN's Intl support handles the lakh/crore grouping correctly.
 const currencyFormatter = new Intl.NumberFormat('en-IN', {

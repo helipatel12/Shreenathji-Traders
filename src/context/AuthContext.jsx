@@ -12,6 +12,7 @@ import {
   completeEmailLinkSignIn,
   isEmailLinkSignIn,
 } from '../firebase/auth'
+import { closeLocalDb, openLocalDbForUser } from '../db/localDb'
 
 export const AuthContext = createContext(null)
 
@@ -22,6 +23,8 @@ export function AuthProvider({ children }) {
   const [userRecord, setUserRecord] = useState(null)
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState(null)
+  const [authReason, setAuthReason] = useState(null)
+  const [reloadToken, setReloadToken] = useState(0)
 
   // Finish passwordless email-link sign-in when user opens the mail link.
   useEffect(() => {
@@ -49,8 +52,10 @@ export function AuthProvider({ children }) {
       const myRequest = ++requestId
       setFirebaseUser(fbUser)
       setError(null)
+      setAuthReason(null)
 
       if (!fbUser) {
+        await closeLocalDb()
         if (myRequest !== requestId) return
         setUserRecord(null)
         setStatus('signed-out')
@@ -67,42 +72,61 @@ export function AuthProvider({ children }) {
           /* ignore */
         }
 
-        const result = await getOrCreateUserOnFirstLogin({
-          uid: fbUser.uid,
-          email: fbUser.email || '',
-          phone: fbUser.phoneNumber || '',
-          name: pendingName || fbUser.displayName || '',
-          emailVerified: Boolean(fbUser.emailVerified),
-        })
+        let result
+        try {
+          result = await getOrCreateUserOnFirstLogin({
+            uid: fbUser.uid,
+            email: fbUser.email || '',
+            phone: fbUser.phoneNumber || '',
+            name: pendingName || fbUser.displayName || '',
+            emailVerified: Boolean(fbUser.emailVerified),
+          })
+        } catch (firstErr) {
+          console.warn('getOrCreate retry after:', firstErr)
+          result = await getOrCreateUserOnFirstLogin({
+            uid: fbUser.uid,
+            email: fbUser.email || '',
+            phone: fbUser.phoneNumber || '',
+            name: pendingName || fbUser.displayName || '',
+            emailVerified: Boolean(fbUser.emailVerified),
+          })
+        }
         if (myRequest !== requestId) return
+
         if (result.status === 'unverified') {
+          await closeLocalDb()
           setUserRecord(null)
           setStatus('unverified')
-        } else if (result.status === 'unauthorized') {
-          setUserRecord(null)
-          setStatus('unauthorized')
-        } else {
-          setUserRecord(result.user)
-          setStatus('signed-in')
+          return
         }
+        if (result.status === 'unauthorized') {
+          await closeLocalDb()
+          setUserRecord(null)
+          setAuthReason(result.reason || null)
+          setStatus('unauthorized')
+          return
+        }
+
+        // Only open Dexie after membership succeeds — a DB failure must not
+        // block the login/verify screens.
+        await openLocalDbForUser(fbUser.uid)
+        if (myRequest !== requestId) return
+
+        setUserRecord(result.user)
+        setStatus('signed-in')
       } catch (err) {
         if (myRequest !== requestId) return
         console.error('Failed to load user record:', err)
         setError(err)
         setUserRecord(null)
         setStatus('error')
-        try {
-          await logoutHelper()
-        } catch (logoutErr) {
-          console.error('Logout after auth error failed:', logoutErr)
-        }
       }
     })
     return () => {
       requestId += 1
       unsubscribe()
     }
-  }, [])
+  }, [reloadToken])
 
   const logout = useCallback(async () => {
     try {
@@ -111,6 +135,55 @@ export function AuthProvider({ children }) {
       /* ignore */
     }
     await logoutHelper()
+    await closeLocalDb()
+  }, [])
+
+  const retryAuthLoad = useCallback(() => {
+    setError(null)
+    setReloadToken((n) => n + 1)
+  }, [])
+
+  /** After user clicks the email verification link, refresh Auth + membership. */
+  const confirmEmailVerified = useCallback(async () => {
+    const fb = auth.currentUser
+    if (!fb) return { ok: false, reason: 'signed-out' }
+    setStatus('loading')
+    setError(null)
+    try {
+      await fb.reload()
+      const fresh = auth.currentUser
+      if (!fresh?.emailVerified) {
+        setStatus('unverified')
+        return { ok: false, reason: 'still-unverified' }
+      }
+      const result = await getOrCreateUserOnFirstLogin({
+        uid: fresh.uid,
+        email: fresh.email || '',
+        phone: fresh.phoneNumber || '',
+        name: fresh.displayName || '',
+        emailVerified: true,
+      })
+      if (result.status === 'unverified') {
+        setStatus('unverified')
+        return { ok: false, reason: 'still-unverified' }
+      }
+      if (result.status === 'unauthorized') {
+        setUserRecord(null)
+        setAuthReason(result.reason || null)
+        setStatus('unauthorized')
+        return { ok: false, reason: 'unauthorized' }
+      }
+      await openLocalDbForUser(fresh.uid)
+      setUserRecord(result.user)
+      setFirebaseUser(fresh)
+      setStatus('signed-in')
+      return { ok: true }
+    } catch (err) {
+      console.error('confirmEmailVerified failed:', err)
+      setError(err)
+      setStatus('error')
+      return { ok: false, reason: 'error' }
+    }
   }, [])
 
   const refreshUser = useCallback(async () => {
@@ -155,7 +228,10 @@ export function AuthProvider({ children }) {
     isCa,
     status,
     error,
+    authReason,
     logout,
+    retryAuthLoad,
+    confirmEmailVerified,
     refreshUser,
     updateOwnProfile,
   }

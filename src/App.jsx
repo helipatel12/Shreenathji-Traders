@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import { useLocale } from './context/LocaleContext'
@@ -8,20 +9,97 @@ import DashboardScreen from './features/dashboard/DashboardScreen'
 import BillsScreen from './features/bills/BillsScreen'
 import DakhlaScreen from './features/vepariDakhla/DakhlaScreen'
 import RojmerScreen from './features/rojmer/RojmerScreen'
+import VepariPayScreen from './features/vepariPay/VepariPayScreen'
 import SilakScreen from './features/jansaSilak/SilakScreen'
 import SettingsScreen from './features/settings/SettingsScreen'
 import UserManagementScreen from './features/admin/UserManagementScreen'
 import QueueMonitorScreen from './features/admin/QueueMonitorScreen'
 import ReportsScreen from './features/reports/ReportsScreen'
 import { SkeletonPage } from './components/Skeleton'
+import { resendEmailVerification, getAuthActionFromUrl, clearAuthActionFromUrl, applyEmailVerificationCode } from './firebase/auth'
 
 function UnauthorizedScreen({ reason = 'unauthorized' }) {
-  const { logout } = useAuth()
+  const { logout, authReason, confirmEmailVerified } = useAuth()
   const { t } = useLocale()
+  const [info, setInfo] = useState('')
+  const [busy, setBusy] = useState(false)
   const title =
     reason === 'unverified' ? t('auth.unverifiedTitle') : t('auth.unauthorizedTitle')
   const body =
-    reason === 'unverified' ? t('auth.unverifiedBody') : t('auth.unauthorizedBody')
+    reason === 'unverified'
+      ? t('auth.unverifiedBody')
+      : authReason === 'phone-needs-email'
+        ? t('auth.phoneNeedsEmailInvite')
+        : t('auth.unauthorizedBody')
+
+  // If the inbox verification link opens while stuck on this screen, apply it.
+  useEffect(() => {
+    if (reason !== 'unverified') return
+    const action = getAuthActionFromUrl()
+    if (!action?.oobCode || action.mode !== 'verifyEmail') return
+    let cancelled = false
+    ;(async () => {
+      setBusy(true)
+      try {
+        await applyEmailVerificationCode(action.oobCode)
+        if (cancelled) return
+        clearAuthActionFromUrl()
+        const result = await confirmEmailVerified()
+        if (!result?.ok && result?.reason === 'still-unverified') {
+          setInfo(t('auth.stillUnverified'))
+        }
+      } catch (err) {
+        if (cancelled) return
+        console.error('Verify link on unauthorized screen failed:', err)
+        setInfo(err?.message || t('auth.errorBody'))
+        clearAuthActionFromUrl()
+      } finally {
+        if (!cancelled) setBusy(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [reason, confirmEmailVerified, t])
+
+  async function handleResend() {
+    if (busy) return
+    setBusy(true)
+    setInfo('')
+    try {
+      await resendEmailVerification()
+      setInfo(t('auth.verificationResent'))
+    } catch (err) {
+      console.error('Resend verification failed:', err)
+      setInfo(err?.message || t('auth.errorBody'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleVerified() {
+    if (busy) return
+    setBusy(true)
+    setInfo('')
+    try {
+      const result = await confirmEmailVerified()
+      if (!result?.ok) {
+        if (result?.reason === 'still-unverified') {
+          setInfo(t('auth.stillUnverified'))
+        } else if (result?.reason === 'unauthorized') {
+          // App will switch to unauthorized screen via status.
+        } else {
+          setInfo(t('auth.errorBody'))
+        }
+      }
+    } catch (err) {
+      console.error('Verify check failed:', err)
+      setInfo(err?.message || t('auth.errorBody'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
       <div className="absolute top-4 right-4">
@@ -32,10 +110,31 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
           {title}
         </p>
         <p className="text-body text-ink">{body}</p>
+        {info && <p className="text-caption text-ink-muted mt-3">{info}</p>}
+        {reason === 'unverified' && (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleVerified}
+              className="w-full mt-4 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors disabled:opacity-40"
+            >
+              {busy ? t('auth.checkingVerification') : t('auth.iVerified')}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleResend}
+              className="w-full mt-3 min-h-12 rounded-xl border border-border bg-surface hover:bg-surface-muted text-ink font-semibold text-body py-3 transition-colors disabled:opacity-40"
+            >
+              {t('auth.resendVerification')}
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={logout}
-          className="w-full mt-5 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
+          className="w-full mt-3 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
         >
           {t('auth.tryDifferentAccount')}
         </button>
@@ -45,7 +144,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
 }
 
 function AuthErrorScreen() {
-  const { logout, error } = useAuth()
+  const { logout, error, retryAuthLoad } = useAuth()
   const { t } = useLocale()
   return (
     <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
@@ -62,8 +161,15 @@ function AuthErrorScreen() {
         )}
         <button
           type="button"
+          onClick={retryAuthLoad}
+          className="w-full mt-2 min-h-12 rounded-xl border border-border bg-surface hover:bg-surface-muted text-ink font-semibold text-body py-3 transition-colors"
+        >
+          {t('auth.retryLoad')}
+        </button>
+        <button
+          type="button"
           onClick={logout}
-          className="w-full mt-2 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
+          className="w-full mt-3 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
         >
           {t('auth.tryDifferentAccount')}
         </button>
@@ -110,6 +216,7 @@ function App() {
           <Route index element={<DashboardScreen />} />
           <Route path="bills" element={<BillsScreen />} />
           <Route path="dakhla" element={<DakhlaScreen />} />
+          <Route path="vepari-pay" element={<VepariPayScreen />} />
           <Route path="rojmer" element={<RojmerScreen />} />
           <Route path="silak" element={<SilakScreen />} />
           <Route path="reports" element={<ReportsScreen />} />

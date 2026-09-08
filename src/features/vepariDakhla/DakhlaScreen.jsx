@@ -10,10 +10,9 @@ import { useAuth } from '../../hooks/useAuth'
 import { useVeparis } from '../../hooks/useVeparis'
 import { useBills } from '../../hooks/useBills'
 import { useBusiness } from '../../hooks/useBusiness'
-import { useVepariDakhla, useAllVepariDakhlaSummary } from '../../hooks/useVepariDakhla'
+import { useVepariDakhla } from '../../hooks/useVepariDakhla'
 import { useLocale } from '../../context/LocaleContext'
-import { todayKeyIST, formatDisplayDate, orderedDateRange } from '../../utils/dates'
-import { vepariStableId } from '../../utils/vepari'
+import { formatDisplayDate } from '../../utils/dates'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import BillForm, { billToFormValues } from '../bills/BillForm'
 import { printBill } from '../bills/billPrint'
@@ -24,17 +23,17 @@ import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import VepariSelect from '../../components/VepariSelect'
 import { SkeletonTable } from '../../components/Skeleton'
-import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
+import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF } from '../../utils/export'
+import { roundCurrency } from '../../utils/calc'
 import { printDakhla } from './dakhlaPrint'
 import {
   buildVepariLedgerRows,
   buildVepariLedgerPdfColumns,
-  buildAllVepariSummaryRows,
-  buildAllVepariSummaryPdfColumns,
 } from './dakhlaExport'
+import AllVepariSummary from './AllVepariSummary'
 
 function SingleVepariLedger() {
-  const { user, canWrite } = useAuth()
+  const { user, canWrite, isOwner } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { veparis } = useVeparis()
   const { updateBill } = useBills()
@@ -80,28 +79,34 @@ function SingleVepariLedger() {
     })
   }, [lines, search, sortKey, sortDir, vepari])
 
-  const visibleTotals = useMemo(
-    () =>
-      visibleLines.reduce(
-        (acc, line) => ({
-          weightKg: (acc.weightKg || 0) + (line.weightKg || 0),
-          tolai: (acc.tolai || 0) + (line.tolai || 0),
-          shes: (acc.shes || 0) + (line.shes || 0),
-          commission: (acc.commission || 0) + (line.commission || 0),
-          goodsAmount: (acc.goodsAmount || 0) + (line.goodsAmount || 0),
-          total: (acc.total || 0) + (line.total || 0),
-        }),
-        {
-          weightKg: 0,
-          tolai: 0,
-          shes: 0,
-          commission: 0,
-          goodsAmount: 0,
-          total: 0,
-        },
-      ),
-    [visibleLines],
-  )
+  const visibleTotals = useMemo(() => {
+    const raw = visibleLines.reduce(
+      (acc, line) => ({
+        weightKg: (acc.weightKg || 0) + (line.weightKg || 0),
+        tolai: (acc.tolai || 0) + (line.tolai || 0),
+        shes: (acc.shes || 0) + (line.shes || 0),
+        commission: (acc.commission || 0) + (line.commission || 0),
+        goodsAmount: (acc.goodsAmount || 0) + (line.goodsAmount || 0),
+        total: (acc.total || 0) + (line.total || 0),
+      }),
+      {
+        weightKg: 0,
+        tolai: 0,
+        shes: 0,
+        commission: 0,
+        goodsAmount: 0,
+        total: 0,
+      },
+    )
+    return {
+      weightKg: roundCurrency(raw.weightKg),
+      tolai: roundCurrency(raw.tolai),
+      shes: roundCurrency(raw.shes),
+      commission: roundCurrency(raw.commission),
+      goodsAmount: roundCurrency(raw.goodsAmount),
+      total: roundCurrency(raw.total),
+    }
+  }, [visibleLines])
 
   function setNoteSort(value) {
     setSortKey('entryNumber')
@@ -134,13 +139,13 @@ function SingleVepariLedger() {
     })
   }
 
-  function exportOne(line, format) {
+  async function exportOne(line, format) {
     const rows = buildVepariLedgerRows([line])
     const filename = `dakhla_${line.bill.entryNumber}`
     const title = `Dakhla — ${line.bill.entryNumber}`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Dakhla')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildVepariLedgerPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Dakhla')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildVepariLedgerPdfColumns(), filename, title)
   }
 
   function printOne(line) {
@@ -283,6 +288,7 @@ function SingleVepariLedger() {
             onSubmit={handleUpdate}
             onCancel={() => setEditingLocalId(null)}
             submitLabel={t('bills.saveChanges')}
+            canEditEntryNumber={isOwner}
           />
         </div>
       )}
@@ -342,167 +348,6 @@ function SingleVepariLedger() {
               </tr>
             ) : null
           }
-        />
-      )}
-    </div>
-  )
-}
-
-function AllVepariSummary() {
-  const { t, formatCurrency, formatDigits } = useLocale()
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
-  const [search, setSearch] = useState('')
-  const range = orderedDateRange(fromDate, toDate)
-  const { rows, loading } = useAllVepariDakhlaSummary(range.fromDate, range.toDate)
-
-  const visibleRows = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((row) => {
-      const hay = `${row.vepari.name || ''} ${row.vepari.village || ''}`.toLowerCase()
-      return hay.includes(q)
-    })
-  }, [rows, search])
-
-  async function doExport(format) {
-    const exportRows = buildAllVepariSummaryRows(visibleRows)
-    const rangeLabel =
-      fromDate || toDate ? `${fromDate || 'start'}_to_${toDate || todayKeyIST()}` : 'all'
-    const filename = `dakhla_summary_${rangeLabel}`
-    const title = 'Vepari Dakhla — All veparis'
-    if (format === 'excel') await exportRowsToExcel(exportRows, filename, 'Dakhla Summary')
-    if (format === 'csv') await exportRowsToCSV(exportRows, filename)
-    if (format === 'pdf')
-      await exportRowsToPDF(exportRows, buildAllVepariSummaryPdfColumns(), filename, title)
-  }
-
-  function handlePrint() {
-    printRows(
-      buildAllVepariSummaryRows(visibleRows),
-      buildAllVepariSummaryPdfColumns(),
-      'Vepari Dakhla — All veparis',
-    )
-  }
-
-  function exportOne(row, format) {
-    const exportRows = buildAllVepariSummaryRows([row])
-    const filename = `dakhla_${row.vepari.name?.replace(/\s+/g, '_') || 'vepari'}`
-    const title = `Vepari Dakhla — ${row.vepari.name}`
-    if (format === 'excel') exportRowsToExcel(exportRows, filename, 'Dakhla Summary')
-    if (format === 'csv') exportRowsToCSV(exportRows, filename)
-    if (format === 'pdf') exportRowsToPDF(exportRows, buildAllVepariSummaryPdfColumns(), filename, title)
-  }
-
-  function printOne(row) {
-    printRows(
-      buildAllVepariSummaryRows([row]),
-      buildAllVepariSummaryPdfColumns(),
-      `Vepari Dakhla — ${row.vepari.name}`,
-    )
-  }
-
-  const columns = [
-    {
-      key: 'name',
-      header: t('bills.vepariLabel'),
-      render: (row) => <span className="font-semibold">{row.vepari.name}</span>,
-    },
-    {
-      key: 'village',
-      header: t('bills.farmerVillageLabel'),
-      render: (row) => <span className="text-ink-muted">{row.vepari.village}</span>,
-    },
-    {
-      key: 'count',
-      header: t('dakhla.billCountLabel'),
-      align: 'right',
-      render: (row) => formatDigits(row.billCount),
-    },
-    {
-      key: 'total',
-      header: t('dakhla.totalLabel'),
-      align: 'right',
-      render: (row) => (
-        <span className="font-semibold">{formatCurrency(row.totals.total)}</span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: t('common.actions'),
-      render: (row) => (
-        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <PrintButton compact onClick={() => printOne(row)} />
-          <ExportMenu
-            compact
-            onExportExcel={() => exportOne(row, 'excel')}
-            onExportCSV={() => exportOne(row, 'csv')}
-            onExportPDF={() => exportOne(row, 'pdf')}
-          />
-        </div>
-      ),
-    },
-  ]
-
-  return (
-    <div>
-      {loading ? (
-        <SkeletonTable rows={5} cols={4} />
-      ) : (
-        <DataTable
-          columns={columns}
-          rows={visibleRows}
-          rowKey={(row) => vepariStableId(row.vepari) || row.vepari.id}
-          selectedKey={selectedId}
-          onRowClick={(row) => {
-            const id = vepariStableId(row.vepari) || row.vepari.id
-            setSelectedId((cur) => (String(cur) === String(id) ? null : id))
-          }}
-          empty={<p className="text-body text-ink-muted">{t('dakhla.noSummary')}</p>}
-          meta={t('common.showingCount', { count: formatDigits(visibleRows.length) })}
-          toolbar={
-            <TableToolbar
-              search={search}
-              onSearchChange={setSearch}
-              searchPlaceholder={t('dakhla.searchPlaceholder')}
-              actions={
-                <>
-                  <input
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                    aria-label={t('common.from')}
-                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
-                  />
-                  <input
-                    type="date"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                    aria-label={t('common.to')}
-                    className="text-body text-ink bg-surface border border-border rounded-lg py-2 px-3 min-h-10"
-                  />
-                  {visibleRows.length > 0 && (
-                    <>
-                      <PrintButton onClick={handlePrint} />
-                      <ExportMenu
-                        label={t('dakhla.exportSummary')}
-                        onExportExcel={() => doExport('excel')}
-                        onExportCSV={() => doExport('csv')}
-                        onExportPDF={() => doExport('pdf')}
-                      />
-                    </>
-                  )}
-                </>
-              }
-            />
-          }
-          renderExpanded={(row) => (
-            <p className="text-body text-ink-muted">
-              {row.vepari.name} · {formatDigits(row.billCount)}{' '}
-              {t('dakhla.billCountLabel').toLowerCase()} · {formatCurrency(row.totals.total)}
-            </p>
-          )}
         />
       )}
     </div>

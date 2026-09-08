@@ -7,6 +7,7 @@ import { db as localDb } from '../db/localDb'
 import {
   billDocRef,
   paymentDocRef,
+  vepariPaymentDocRef,
   vepariDocRef,
   silakEntryDocRef,
 } from '../firebase/firestore'
@@ -47,6 +48,11 @@ async function flushTable(table, docRefFor, { allowDelete = false } = {}) {
         await updateDoc(ref, data)
       } catch (err) {
         if (err?.code === 'not-found' || /not.?found|No document/i.test(String(err?.message || ''))) {
+          if (allowDelete) {
+            // Remote was deleted — do not resurrect (C3). Drop local pending.
+            await table.delete(row.id)
+            continue
+          }
           await setDoc(ref, {
             ...data,
             createdAt: serverTimestamp(),
@@ -67,6 +73,9 @@ export async function flushPendingWrites() {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { skipped: 'offline' }
   }
+  if (!localDb.isOpen()) {
+    return { skipped: 'db-closed' }
+  }
   if (flushing) {
     flushAgain = true
     return { skipped: 'busy' }
@@ -77,6 +86,7 @@ export async function flushPendingWrites() {
       flushAgain = false
       await flushTable(localDb.bills, billDocRef)
       await flushTable(localDb.payments, paymentDocRef)
+      await flushTable(localDb.vepariPayments, vepariPaymentDocRef)
       await flushTable(localDb.veparis, vepariDocRef, { allowDelete: true })
       await flushTable(localDb.silakEntries, silakEntryDocRef, { allowDelete: true })
     } while (flushAgain)

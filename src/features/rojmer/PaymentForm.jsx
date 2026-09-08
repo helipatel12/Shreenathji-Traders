@@ -9,7 +9,14 @@ import { preprocessNumber, parseLocaleNumber, convertIndicDigits } from '../../u
 const inputClasses =
   'text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 focus:border-accent focus:ring-2 focus:ring-accent-soft'
 
-export default function PaymentForm({ maxAmount, initialValues, onSubmit, onCancel, submitLabel }) {
+export default function PaymentForm({
+  maxAmount,
+  initialValues,
+  onSubmit,
+  onCancel,
+  submitLabel,
+  i18nPrefix = 'rojmer',
+}) {
   const { t } = useLocale()
   const ceiling = initialValues
     ? parseLocaleNumber(initialValues.amount) + Number(maxAmount)
@@ -23,12 +30,12 @@ export default function PaymentForm({ maxAmount, initialValues, onSubmit, onCanc
           z
             .number()
             .positive(t('bills.mustBePositive'))
-            .max(ceiling, t('rojmer.amountExceedsBalance', { max: ceiling })),
+            .max(ceiling, t(`${i18nPrefix}.amountExceedsBalance`, { max: ceiling })),
         ),
         type: z.enum(['cash', 'cheque']),
         date: z.string().min(1, t('bills.required')),
       }),
-    [t, ceiling],
+    [t, ceiling, i18nPrefix],
   )
 
   const {
@@ -58,7 +65,7 @@ export default function PaymentForm({ maxAmount, initialValues, onSubmit, onCanc
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
           <label htmlFor="amount" className="block text-caption text-ink-muted mb-1.5">
-            {t('rojmer.amountLabel')}
+            {t(`${i18nPrefix}.amountLabel`)}
           </label>
           <input
             id="amount"
@@ -80,16 +87,16 @@ export default function PaymentForm({ maxAmount, initialValues, onSubmit, onCanc
         </div>
         <div>
           <label htmlFor="type" className="block text-caption text-ink-muted mb-1.5">
-            {t('rojmer.paymentTypeLabel')}
+            {t(`${i18nPrefix}.paymentTypeLabel`)}
           </label>
           <select id="type" className={inputClasses} {...register('type')}>
-            <option value="cash">{t('rojmer.cash')}</option>
-            <option value="cheque">{t('rojmer.cheque')}</option>
+            <option value="cash">{t(`${i18nPrefix}.cash`)}</option>
+            <option value="cheque">{t(`${i18nPrefix}.cheque`)}</option>
           </select>
         </div>
         <div>
           <label htmlFor="date" className="block text-caption text-ink-muted mb-1.5">
-            {t('rojmer.dateLabel')}
+            {t(`${i18nPrefix}.dateLabel`)}
           </label>
           <input id="date" type="date" className={inputClasses} {...register('date')} />
           {errors.date && <p className="text-caption text-danger mt-1">{errors.date.message}</p>}

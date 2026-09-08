@@ -164,7 +164,7 @@ function DayView() {
     printRows(buildDayRows(day), buildDayPdfColumns(), `Jansa Silak — ${date}`)
   }
 
-  function exportOne(entry, format) {
+  async function exportOne(entry, format) {
     const rows = buildDayRows({
       entries: [entry],
       openingBalance: 0,
@@ -172,9 +172,9 @@ function DayView() {
     }).slice(0, 1)
     const filename = `silak_${date}_${entry.key || entry.id || 'entry'}`
     const title = `Jansa Silak — ${entry.label}`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildDayPdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildDayPdfColumns(), filename, title)
   }
 
   function printOne(entry) {
@@ -300,8 +300,12 @@ function DayView() {
         </div>
       )}
 
-      {loading || !day ? (
+      {loading ? (
         <SkeletonTable rows={5} cols={3} />
+      ) : !date ? (
+        <p className="text-body text-ink-muted card px-5 py-6">{t('silak.pickDate')}</p>
+      ) : !day ? (
+        <p className="text-body text-ink-muted card px-5 py-6">{t('silak.noEntries')}</p>
       ) : (
         <>
           <div className="card px-4 py-3 mb-3 flex items-center justify-between">
@@ -445,13 +449,13 @@ function RangeView({ mode }) {
     printRows(buildRangeRows(sortedDays), buildRangePdfColumns(), `Jansa Silak — ${fromDate} to ${toDate}`)
   }
 
-  function exportOne(day, format) {
+  async function exportOne(day, format) {
     const rows = buildRangeRows([day])
     const filename = `silak_${day.date}`
     const title = `Jansa Silak — ${day.date}`
-    if (format === 'excel') exportRowsToExcel(rows, filename, 'Silak')
-    if (format === 'csv') exportRowsToCSV(rows, filename)
-    if (format === 'pdf') exportRowsToPDF(rows, buildRangePdfColumns(), filename, title)
+    if (format === 'excel') await exportRowsToExcel(rows, filename, 'Silak')
+    if (format === 'csv') await exportRowsToCSV(rows, filename)
+    if (format === 'pdf') await exportRowsToPDF(rows, buildRangePdfColumns(), filename, title)
   }
 
   function printOne(day) {

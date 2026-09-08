@@ -8,9 +8,13 @@ import {
   signOut,
   updateEmail,
   sendPasswordResetEmail,
+  sendEmailVerification,
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
+  verifyPasswordResetCode,
+  confirmPasswordReset,
+  applyActionCode,
   GoogleAuthProvider,
   OAuthProvider,
   signInWithPopup,
@@ -21,13 +25,46 @@ import { auth } from './config'
 
 const EMAIL_LINK_KEY = 'st_email_for_sign_in'
 
+function appContinueUrl(extraQuery = '') {
+  const path = typeof window !== 'undefined' ? window.location.pathname || '/' : '/'
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const q = extraQuery ? (extraQuery.startsWith('?') ? extraQuery : `?${extraQuery}`) : ''
+  return `${origin}${path}${q}`
+}
+
 export async function signUp(email, password) {
-  const credential = await createUserWithEmailAndPassword(auth, email, password)
+  const credential = await createUserWithEmailAndPassword(
+    auth,
+    String(email || '').trim(),
+    password,
+  )
+  try {
+    await sendEmailVerification(credential.user, {
+      url: appContinueUrl('mode=verifyEmail'),
+      handleCodeInApp: true,
+    })
+  } catch (err) {
+    console.error('Failed to send verification email:', err)
+  }
   return credential.user
 }
 
+export async function resendEmailVerification() {
+  const user = auth.currentUser
+  if (!user) throw new Error('Not signed in')
+  if (user.emailVerified) return
+  await sendEmailVerification(user, {
+    url: appContinueUrl('mode=verifyEmail'),
+    handleCodeInApp: true,
+  })
+}
+
 export async function signIn(email, password) {
-  const credential = await signInWithEmailAndPassword(auth, email, password)
+  const credential = await signInWithEmailAndPassword(
+    auth,
+    String(email || '').trim(),
+    password,
+  )
   return credential.user
 }
 
@@ -42,13 +79,63 @@ export async function changeAuthEmail(newEmail) {
 }
 
 export async function sendPasswordReset(email) {
-  await sendPasswordResetEmail(auth, email.trim())
+  const trimmed = String(email || '').trim()
+  const actionCodeSettings = {
+    url: appContinueUrl('mode=resetPassword'),
+    handleCodeInApp: true,
+  }
+  await sendPasswordResetEmail(auth, trimmed, actionCodeSettings)
+}
+
+/** Returns the account email for a valid password-reset oobCode. */
+export async function verifyResetCode(oobCode) {
+  return verifyPasswordResetCode(auth, String(oobCode || '').trim())
+}
+
+export async function confirmResetPassword(oobCode, newPassword) {
+  await confirmPasswordReset(auth, String(oobCode || '').trim(), newPassword)
+}
+
+/** Apply email-verification oobCode from the inbox link. */
+export async function applyEmailVerificationCode(oobCode) {
+  await applyActionCode(auth, String(oobCode || '').trim())
+  if (auth.currentUser) {
+    await auth.currentUser.reload()
+  }
+}
+
+/** Read Firebase action params from the current URL (reset / verify / sign-in). */
+export function getAuthActionFromUrl() {
+  if (typeof window === 'undefined') return null
+  try {
+    const url = new URL(window.location.href)
+    const mode = url.searchParams.get('mode') || ''
+    const oobCode = url.searchParams.get('oobCode') || ''
+    if (!mode && !oobCode) return null
+    return { mode, oobCode }
+  } catch {
+    return null
+  }
+}
+
+export function clearAuthActionFromUrl() {
+  try {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('mode')
+    url.searchParams.delete('oobCode')
+    url.searchParams.delete('apiKey')
+    url.searchParams.delete('lang')
+    url.searchParams.delete('continueUrl')
+    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash)
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function sendEmailSignInLink(email) {
   const trimmed = email.trim()
   const actionCodeSettings = {
-    url: `${window.location.origin}${window.location.pathname}`,
+    url: appContinueUrl(),
     handleCodeInApp: true,
   }
   await sendSignInLinkToEmail(auth, trimmed, actionCodeSettings)

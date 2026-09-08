@@ -1,7 +1,11 @@
+// Vepari settlement payments — mirror of usePayments.js (farmer Rojmer).
+// Linked by billId === bill.firestoreId; balance uses dakhla line total
+// (see getDakhlaClearingInfo), not bill.totalAmount.
+
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { paymentCollectionRef, paymentDocRef } from '../firebase/firestore'
+import { vepariPaymentCollectionRef, vepariPaymentDocRef } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
 import { onLocalDataChanged } from '../utils/localDataEvents'
 import {
@@ -14,13 +18,13 @@ import { parseLocaleNumber } from '../utils/numbers'
 
 const EDITABLE_FIELDS = ['amount', 'type', 'date']
 
-export function usePayments() {
+export function useVepariPayments() {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
 
   const refreshLocal = useCallback(async () => {
-    await dedupeTableByFirestoreId(localDb.payments)
-    const rows = await localDb.payments.toArray()
+    await dedupeTableByFirestoreId(localDb.vepariPayments)
+    const rows = await localDb.vepariPayments.toArray()
     setPayments(rows)
   }, [])
 
@@ -29,16 +33,16 @@ export function usePayments() {
   }, [refreshLocal])
 
   useEffect(() => onLocalDataChanged((table) => {
-    if (table === 'payments' || table == null) refreshLocal()
+    if (table === 'vepariPayments' || table == null) refreshLocal()
   }), [refreshLocal])
 
   useEffect(() => {
     let cancelled = false
     let generation = 0
-    const unsubscribe = onSnapshot(paymentCollectionRef(), async (snapshot) => {
+    const unsubscribe = onSnapshot(vepariPaymentCollectionRef(), async (snapshot) => {
       const gen = ++generation
       const isCurrent = () => !cancelled && gen === generation
-      await applyCollectionSnapshot(localDb.payments, snapshot, {
+      await applyCollectionSnapshot(localDb.vepariPayments, snapshot, {
         isCurrent,
         mapDoc: (docSnap) => {
           const data = docSnap.data()
@@ -66,9 +70,9 @@ export function usePayments() {
       createdBy,
       editHistory: [],
     }
-    const ref = doc(paymentCollectionRef())
+    const ref = doc(vepariPaymentCollectionRef())
     const createdAtLocal = Date.now()
-    const localId = await localDb.payments.add({
+    const localId = await localDb.vepariPayments.add({
       ...payload,
       firestoreId: ref.id,
       createdAtLocal,
@@ -78,19 +82,18 @@ export function usePayments() {
     await refreshLocal()
     try {
       await setDoc(ref, { ...payload, createdAt: serverTimestamp(), createdAtLocal })
-      await markSyncedIfUnchanged(localDb.payments, localId, 1)
+      await markSyncedIfUnchanged(localDb.vepariPayments, localId, 1)
     } catch (err) {
-      console.error('Payment save queued locally — Firestore sync failed:', err)
+      console.error('Vepari payment save queued locally — Firestore sync failed:', err)
     }
     await refreshLocal()
     return localId
   }
 
   async function updatePayment(localId, changes, editedBy) {
-    const existing = await localDb.payments.get(localId)
+    const existing = await localDb.vepariPayments.get(localId)
     if (!existing) return
     if (existing.isVoided) throw new Error('PAYMENT_VOIDED')
-    // billId is immutable (H7) — ignore attempts to retarget.
     const normalized = { ...changes }
     delete normalized.billId
     if (changes.amount != null) normalized.amount = parseLocaleNumber(changes.amount)
@@ -99,7 +102,7 @@ export function usePayments() {
     const editHistory = [...(existing.editHistory || []), ...newHistoryEntries]
     const syncRevision = nextSyncRevision(existing)
     const localUpdate = { ...normalized, editHistory }
-    await localDb.payments.update(localId, {
+    await localDb.vepariPayments.update(localId, {
       ...localUpdate,
       syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
@@ -107,17 +110,17 @@ export function usePayments() {
     await refreshLocal()
     if (existing.firestoreId) {
       try {
-        await updateDoc(paymentDocRef(existing.firestoreId), localUpdate)
-        await markSyncedIfUnchanged(localDb.payments, localId, syncRevision)
+        await updateDoc(vepariPaymentDocRef(existing.firestoreId), localUpdate)
+        await markSyncedIfUnchanged(localDb.vepariPayments, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
-        console.error('Payment edit queued locally — Firestore sync failed:', err)
+        console.error('Vepari payment edit queued locally — Firestore sync failed:', err)
       }
     }
   }
 
   async function voidPayment(localId, reason, voidedBy) {
-    const existing = await localDb.payments.get(localId)
+    const existing = await localDb.vepariPayments.get(localId)
     if (!existing || existing.isVoided) return
     const voidedAt = new Date().toISOString()
     const historyEntry = {
@@ -135,7 +138,7 @@ export function usePayments() {
       voidedAt,
       editHistory: [...(existing.editHistory || []), historyEntry],
     }
-    await localDb.payments.update(localId, {
+    await localDb.vepariPayments.update(localId, {
       ...changes,
       syncRevision,
       syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
@@ -143,11 +146,11 @@ export function usePayments() {
     await refreshLocal()
     if (existing.firestoreId) {
       try {
-        await updateDoc(paymentDocRef(existing.firestoreId), changes)
-        await markSyncedIfUnchanged(localDb.payments, localId, syncRevision)
+        await updateDoc(vepariPaymentDocRef(existing.firestoreId), changes)
+        await markSyncedIfUnchanged(localDb.vepariPayments, localId, syncRevision)
         await refreshLocal()
       } catch (err) {
-        console.error('Payment void queued locally — Firestore sync failed:', err)
+        console.error('Vepari payment void queued locally — Firestore sync failed:', err)
       }
     }
   }

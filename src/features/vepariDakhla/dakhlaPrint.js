@@ -125,10 +125,17 @@ function resolvePrintDate(lines) {
 
 function resolveSerial(lines) {
   const nums = lines
-    .map((l) => Number(l.bill.entryNumber))
-    .filter((n) => Number.isFinite(n))
-  if (!nums.length) return ''
-  return String(Math.max(...nums))
+    .map((l) => Number(l.bill.dakhlaNumber))
+    .filter((n) => Number.isFinite(n) && n > 0)
+  if (!nums.length) {
+    const fallback = lines
+      .map((l) => Number(l.bill.entryNumber))
+      .filter((n) => Number.isFinite(n))
+    if (!fallback.length) return ''
+    return String(Math.max(...fallback))
+  }
+  // Day-group print: all lines share one dakhla number.
+  return String(Math.min(...nums))
 }
 
 async function loadGujaratiFontFace() {

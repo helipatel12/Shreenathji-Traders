@@ -31,7 +31,10 @@ export function useVeparis() {
     const unsubscribe = onSnapshot(vepariCollectionRef(), async (snapshot) => {
       const gen = ++generation
       const isCurrent = () => !cancelled && gen === generation
-      await applyCollectionSnapshot(localDb.veparis, snapshot, { isCurrent })
+      await applyCollectionSnapshot(localDb.veparis, snapshot, {
+        isCurrent,
+        abandonPendingIfMissing: true,
+      })
       if (isCurrent()) await refreshLocal()
     })
     return () => {

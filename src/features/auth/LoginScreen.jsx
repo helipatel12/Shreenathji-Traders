@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Eye, EyeOff, Receipt, BookOpen, Wallet } from 'lucide-react'
 import {
   signIn,
@@ -9,6 +9,11 @@ import {
   confirmSmsCode,
   signInWithGoogle,
   signInWithApple,
+  verifyResetCode,
+  confirmResetPassword,
+  getAuthActionFromUrl,
+  clearAuthActionFromUrl,
+  applyEmailVerificationCode,
 } from '../../firebase/auth'
 import { stashPendingDisplayName } from '../../context/AuthContext'
 import { useLocale } from '../../context/LocaleContext'
@@ -49,11 +54,15 @@ export default function LoginScreen() {
   const { t } = useLocale()
   // signin | signup | forgot | alternate
   const [mode, setMode] = useState('signin')
+  const [forgotStep, setForgotStep] = useState('email') // email | code
   const [altChannel, setAltChannel] = useState('email') // email | phone
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
+  const [resetCode, setResetCode] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [smsCode, setSmsCode] = useState('')
   const [smsConfirmation, setSmsConfirmation] = useState(null)
   const [showPassword, setShowPassword] = useState(false)
@@ -62,9 +71,48 @@ export default function LoginScreen() {
   const [infoMessage, setInfoMessage] = useState('')
 
   const isValidName = name.trim().length >= 2
-  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const isValidPassword = password.length >= 6
+  const isValidNewPassword = newPassword.length >= 6
   const isValidPhone = phone.replace(/\D/g, '').length >= 10
+  const isValidResetCode = resetCode.trim().length >= 8
+
+  // Handle inbox links: password reset + email verification.
+  useEffect(() => {
+    const action = getAuthActionFromUrl()
+    if (!action?.oobCode) return
+
+    if (action.mode === 'resetPassword') {
+      setMode('forgot')
+      setForgotStep('code')
+      setResetCode(action.oobCode)
+      setInfoMessage(t('auth.resetCodeReady'))
+      clearAuthActionFromUrl()
+      return
+    }
+
+    if (action.mode === 'verifyEmail') {
+      let cancelled = false
+      ;(async () => {
+        try {
+          await applyEmailVerificationCode(action.oobCode)
+          if (cancelled) return
+          clearAuthActionFromUrl()
+          setMode('signin')
+          setInfoMessage(t('auth.emailVerifiedOk'))
+        } catch (err) {
+          if (cancelled) return
+          console.error('Email verification link failed:', err)
+          setErrorMessage(friendlyAuthError(err))
+          clearAuthActionFromUrl()
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount for URL actions
+  }, [])
 
   function friendlyAuthError(err) {
     const code = err?.code || ''
@@ -92,7 +140,9 @@ export default function LoginScreen() {
       return t('auth.errSmsBilling')
     }
     if (code.includes('invalid-phone-number')) return t('auth.errInvalidPhone')
-    if (code.includes('invalid-verification-code')) return t('auth.errInvalidCode')
+    if (code.includes('invalid-verification-code') || code.includes('invalid-action-code') || code.includes('expired-action-code')) {
+      return t('auth.errInvalidResetCode')
+    }
     if (code.includes('account-exists-with-different-credential')) {
       return t('auth.errAccountExists')
     }
@@ -105,23 +155,41 @@ export default function LoginScreen() {
     setInfoMessage('')
     setSmsConfirmation(null)
     setSmsCode('')
+    if (next === 'forgot') {
+      setForgotStep('email')
+      setResetCode('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+    }
   }
 
   async function handlePasswordSubmit(e) {
     e.preventDefault()
     if (submitting) return
-    if (mode === 'signup' && !isValidName) return
-    if (!isValidEmail || !isValidPassword) return
+    if (mode === 'signup' && !isValidName) {
+      setErrorMessage(t('auth.errNameRequired'))
+      return
+    }
+    if (!isValidEmail) {
+      setErrorMessage(t('auth.errInvalidEmail'))
+      return
+    }
+    if (!isValidPassword) {
+      setErrorMessage(t('auth.errWeakPassword'))
+      return
+    }
     setSubmitting(true)
     setErrorMessage('')
     setInfoMessage('')
     if (mode === 'signup') stashPendingDisplayName(name)
     try {
-      if (mode === 'signup') await signUp(email, password)
-      else await signIn(email, password)
+      if (mode === 'signup') await signUp(email.trim(), password)
+      else await signIn(email.trim(), password)
+      // AuthContext takes over (loading → signed-in / unverified / unauthorized).
     } catch (err) {
       console.error(`${mode} failed:`, err)
       setErrorMessage(friendlyAuthError(err))
+    } finally {
       setSubmitting(false)
     }
   }
@@ -133,10 +201,48 @@ export default function LoginScreen() {
     setErrorMessage('')
     setInfoMessage('')
     try {
-      await sendPasswordReset(email)
-      setInfoMessage(t('auth.resetSent'))
+      await sendPasswordReset(email.trim())
+      setForgotStep('code')
+      setInfoMessage(t('auth.resetSentEnterCode'))
     } catch (err) {
       console.error('Password reset failed:', err)
+      setErrorMessage(friendlyAuthError(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleConfirmReset(e) {
+    e.preventDefault()
+    if (submitting) return
+    if (!isValidResetCode) {
+      setErrorMessage(t('auth.errInvalidResetCode'))
+      return
+    }
+    if (!isValidNewPassword) {
+      setErrorMessage(t('auth.errWeakPassword'))
+      return
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMessage(t('auth.errPasswordMismatch'))
+      return
+    }
+    setSubmitting(true)
+    setErrorMessage('')
+    setInfoMessage('')
+    try {
+      const accountEmail = await verifyResetCode(resetCode)
+      await confirmResetPassword(resetCode, newPassword)
+      if (accountEmail && !email.trim()) setEmail(accountEmail)
+      setPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setResetCode('')
+      setForgotStep('email')
+      setMode('signin')
+      setInfoMessage(t('auth.resetPasswordOk'))
+    } catch (err) {
+      console.error('Confirm reset failed:', err)
       setErrorMessage(friendlyAuthError(err))
     } finally {
       setSubmitting(false)
@@ -188,6 +294,7 @@ export default function LoginScreen() {
     } catch (err) {
       console.error('SMS confirm failed:', err)
       setErrorMessage(friendlyAuthError(err))
+    } finally {
       setSubmitting(false)
     }
   }
@@ -203,6 +310,7 @@ export default function LoginScreen() {
     } catch (err) {
       console.error(`${provider} sign-in failed:`, err)
       setErrorMessage(friendlyAuthError(err))
+    } finally {
       setSubmitting(false)
     }
   }
@@ -220,7 +328,7 @@ export default function LoginScreen() {
     subhead = t('auth.loginSubhead')
   } else if (mode === 'forgot') {
     headline = t('auth.forgotHeadline')
-    subhead = t('auth.forgotSubhead')
+    subhead = forgotStep === 'code' ? t('auth.enterResetCodeHint') : t('auth.forgotSubhead')
   } else if (mode === 'alternate') {
     headline = t('auth.alternateHeadline')
     subhead = t('auth.alternateSubhead')
@@ -409,8 +517,9 @@ export default function LoginScreen() {
             </form>
           )}
 
-          {mode === 'forgot' && (
+          {mode === 'forgot' && forgotStep === 'email' && (
             <form onSubmit={handleForgot} className="flex flex-col gap-4 flex-1">
+              <p className="text-caption text-ink-muted">{t('auth.forgotCodeHint')}</p>
               <div>
                 <label
                   htmlFor="reset-email"
@@ -440,7 +549,18 @@ export default function LoginScreen() {
                 disabled={!isValidEmail || submitting}
                 className="w-full min-h-12 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold disabled:opacity-40"
               >
-                {submitting ? t('auth.sending') : t('auth.sendReset')}
+                {submitting ? t('auth.sending') : t('auth.sendResetCode')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotStep('code')
+                  setErrorMessage('')
+                  setInfoMessage('')
+                }}
+                className="text-caption text-accent font-semibold text-left hover:underline"
+              >
+                {t('auth.haveResetCode')}
               </button>
               <button
                 type="button"
@@ -448,6 +568,87 @@ export default function LoginScreen() {
                 className="text-caption text-ink-muted hover:text-ink text-left"
               >
                 ← {t('auth.backToLogin')}
+              </button>
+            </form>
+          )}
+
+          {mode === 'forgot' && forgotStep === 'code' && (
+            <form onSubmit={handleConfirmReset} className="flex flex-col gap-4 flex-1">
+              <p className="text-caption text-ink-muted">{t('auth.enterResetCodeHint')}</p>
+              <div>
+                <label
+                  htmlFor="reset-code"
+                  className="block text-[11px] uppercase tracking-wide text-ink-muted mb-1.5 font-medium"
+                >
+                  {t('auth.resetCodeLabel')}
+                </label>
+                <input
+                  id="reset-code"
+                  type="text"
+                  autoComplete="one-time-code"
+                  value={resetCode}
+                  onChange={(e) => setResetCode(e.target.value.trim())}
+                  className={inputClass}
+                  placeholder={t('auth.resetCodePlaceholder')}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="new-password"
+                  className="block text-[11px] uppercase tracking-wide text-ink-muted mb-1.5 font-medium"
+                >
+                  {t('auth.newPasswordLabel')}
+                </label>
+                <input
+                  id="new-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="confirm-new-password"
+                  className="block text-[11px] uppercase tracking-wide text-ink-muted mb-1.5 font-medium"
+                >
+                  {t('auth.confirmPasswordLabel')}
+                </label>
+                <input
+                  id="confirm-new-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              {infoMessage && (
+                <p className="text-caption text-success rounded-xl bg-green-50 px-3 py-2">
+                  {infoMessage}
+                </p>
+              )}
+              {errorMessage && (
+                <p className="text-caption text-danger rounded-xl bg-red-50 px-3 py-2">{errorMessage}</p>
+              )}
+              <button
+                type="submit"
+                disabled={submitting || !isValidResetCode || !isValidNewPassword}
+                className="w-full min-h-12 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold disabled:opacity-40"
+              >
+                {submitting ? t('auth.savingPassword') : t('auth.saveNewPassword')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotStep('email')
+                  setErrorMessage('')
+                  setInfoMessage('')
+                }}
+                className="text-caption text-ink-muted hover:text-ink text-left"
+              >
+                ← {t('auth.backToSendCode')}
               </button>
             </form>
           )}

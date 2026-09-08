@@ -32,6 +32,9 @@ async function findPreferredLocal(table, firestoreId) {
     const av = isRecordVoided(a) ? 0 : 1
     const bv = isRecordVoided(b) ? 0 : 1
     if (av !== bv) return av - bv
+    const ar = Number(a.syncRevision) || 0
+    const br = Number(b.syncRevision) || 0
+    if (ar !== br) return br - ar
     return (a.id || 0) - (b.id || 0)
   })
   return matches[0]
@@ -58,6 +61,16 @@ export async function upsertByFirestoreId(table, firestoreId, remote) {
   const existing = await findPreferredLocal(table, firestoreId)
   if (existing) {
     if (isPendingLocal(existing)) {
+      // Remote void always wins over a pending edit (H2) — keep other
+      // pending field changes, but never ignore a void from another device.
+      if (isRecordVoided(remote) && !isRecordVoided(existing)) {
+        await table.update(existing.id, {
+          isVoided: true,
+          voidReason: remote.voidReason || existing.voidReason || '',
+          voidedBy: remote.voidedBy || existing.voidedBy || '',
+          voidedAt: remote.voidedAt || existing.voidedAt || '',
+        })
+      }
       const dupes = await table.where('firestoreId').equals(firestoreId).toArray()
       for (const row of dupes) {
         if (row.id !== existing.id && !isPendingLocal(row)) await table.delete(row.id)
@@ -65,18 +78,21 @@ export async function upsertByFirestoreId(table, firestoreId, remote) {
       return
     }
     const merged = { ...remote, firestoreId, syncStatus: 'synced' }
-    if (
-      (merged.entryNumber == null || merged.entryNumber === '') &&
-      existing.entryNumber != null &&
-      existing.entryNumber !== ''
-    ) {
-      merged.entryNumber = existing.entryNumber
+    // નોંધ નં. is never auto-renumbered. Prefer cloud when set (includes
+    // intentional owner edits). Keep local only when cloud has none.
+    // Never clear a set number.
+    const localN = Number(existing.entryNumber)
+    const remoteN = Number(remote.entryNumber)
+    const localOk = Number.isFinite(localN) && localN > 0
+    const remoteOk = Number.isFinite(remoteN) && remoteN > 0
+    if (remoteOk) {
+      merged.entryNumber = remoteN
+    } else if (localOk) {
+      merged.entryNumber = localN
     }
-    if (
-      Array.isArray(existing.editHistory) &&
-      existing.editHistory.length > (merged.editHistory?.length || 0)
-    ) {
-      merged.editHistory = existing.editHistory
+    // Preserve first-seen local timestamp (M6); remote snapshot wins other fields.
+    if (existing.createdAtLocal) {
+      merged.createdAtLocal = existing.createdAtLocal
     }
     mergeVoidFlags(existing, remote, merged)
     await table.update(existing.id, merged)
@@ -85,11 +101,22 @@ export async function upsertByFirestoreId(table, firestoreId, remote) {
       if (row.id !== existing.id) await table.delete(row.id)
     }
   } else {
-    await table.add({ ...remote, firestoreId, syncStatus: 'synced' })
+    await table.add({
+      ...remote,
+      firestoreId,
+      syncStatus: 'synced',
+      createdAtLocal: remote.createdAtLocal || Date.now(),
+    })
   }
 }
 
-export async function removeMissingSynced(table, remoteIds) {
+/**
+ * Drop local rows whose remote doc is gone.
+ * @param {{ abandonPending?: boolean }} opts
+ *   abandonPending — for deletable collections (vepari/silak): drop pending
+ *   edits too so flush cannot resurrect a remote delete (C3).
+ */
+export async function removeMissingSynced(table, remoteIds, { abandonPending = false } = {}) {
   const syncedRows = await table.where('syncStatus').equals('synced').toArray()
   for (const row of syncedRows) {
     if (row.firestoreId && !remoteIds.has(row.firestoreId)) {
@@ -100,6 +127,14 @@ export async function removeMissingSynced(table, remoteIds) {
   for (const row of pendingDeletes) {
     if (row.firestoreId && !remoteIds.has(row.firestoreId)) {
       await table.delete(row.id)
+    }
+  }
+  if (abandonPending) {
+    const pending = await table.where('syncStatus').equals('pending').toArray()
+    for (const row of pending) {
+      if (row.firestoreId && !remoteIds.has(row.firestoreId)) {
+        await table.delete(row.id)
+      }
     }
   }
 }
@@ -120,7 +155,12 @@ export async function dedupeTableByFirestoreId(table) {
     let keep
     if (prevPending && !rowPending) keep = prev
     else if (rowPending && !prevPending) keep = row
-    else if (isRecordVoided(prev) && !isRecordVoided(row)) keep = prev
+    else if (prevPending && rowPending) {
+      // Prefer higher revision so a newer pending edit is not dropped (L3).
+      const pr = Number(prev.syncRevision) || 0
+      const rr = Number(row.syncRevision) || 0
+      keep = rr > pr ? row : prev.id <= row.id ? prev : row
+    } else if (isRecordVoided(prev) && !isRecordVoided(row)) keep = prev
     else if (isRecordVoided(row) && !isRecordVoided(prev)) keep = row
     else keep = prev.id <= row.id ? prev : row
     const drop = keep.id === prev.id ? row : prev
@@ -134,7 +174,11 @@ export async function dedupeTableByFirestoreId(table) {
  * stale in-flight handler cannot resurrect rows after a newer snapshot
  * or unmount.
  */
-export async function applyCollectionSnapshot(table, snapshot, { generation, isCurrent, mapDoc }) {
+export async function applyCollectionSnapshot(
+  table,
+  snapshot,
+  { generation, isCurrent, mapDoc, abandonPendingIfMissing = false } = {},
+) {
   if (!isCurrent()) return
   for (const docSnap of snapshot.docs) {
     if (!isCurrent()) return
@@ -142,7 +186,9 @@ export async function applyCollectionSnapshot(table, snapshot, { generation, isC
     await upsertByFirestoreId(table, docSnap.id, remote)
   }
   if (!isCurrent()) return
-  await removeMissingSynced(table, new Set(snapshot.docs.map((d) => d.id)))
+  await removeMissingSynced(table, new Set(snapshot.docs.map((d) => d.id)), {
+    abandonPending: abandonPendingIfMissing,
+  })
   if (!isCurrent()) return
   await dedupeTableByFirestoreId(table)
   return generation
