@@ -268,15 +268,20 @@ export default function LoginScreen() {
   }
 
   return (
-    <div className="min-h-svh bg-surface-muted text-ink flex items-center justify-center p-3 sm:p-6">
+    <div className="min-h-svh text-ink flex items-center justify-center p-3 sm:p-6 relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_10%_-10%,rgba(26,54,48,0.12),transparent_55%),radial-gradient(700px_380px_at_100%_0%,rgba(196,163,90,0.12),transparent_50%)]" />
       <div className="absolute top-4 right-4 z-30">
         <LanguageToggle />
       </div>
 
-      <div className="relative w-full max-w-5xl overflow-hidden rounded-[1.75rem] bg-surface shadow-[var(--shadow-raised)] border border-border grid lg:grid-cols-[1.05fr_1fr] min-h-[min(640px,90svh)]">
+      <div className="relative w-full max-w-5xl overflow-hidden rounded-[1.85rem] bg-surface/95 shadow-[var(--shadow-raised)] border border-border/80 grid lg:grid-cols-[1.05fr_1fr] min-h-[min(640px,90svh)] backdrop-blur-sm">
         <div className="flex flex-col px-6 py-8 sm:px-10 sm:py-10">
-          <div className="inline-flex items-center gap-2 self-start rounded-full border border-border bg-surface-muted px-3 py-1.5 mb-8">
-            <img src="/icons/icon-192.png" alt="" className="h-6 w-6 object-contain" />
+          <div className="inline-flex items-center gap-2.5 self-start mb-8">
+            <img
+              src="/icons/logo_full_ink_transparent.png"
+              alt=""
+              className="h-12 w-auto object-contain"
+            />
             <span className="text-caption font-semibold text-ink truncate max-w-[10rem]">
               {t('common.businessNameEn')}
             </span>
@@ -734,7 +739,7 @@ export default function LoginScreen() {
               <img
                 src="/icons/logo_full_ink_transparent.png"
                 alt=""
-                className="h-14 w-auto object-contain brightness-0 invert opacity-90"
+                className="h-16 w-auto object-contain brightness-0 invert drop-shadow-sm"
               />
             </div>
 

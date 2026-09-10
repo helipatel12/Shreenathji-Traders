@@ -8,7 +8,6 @@ import {
   Landmark,
   HandCoins,
   Settings,
-  Shield,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,8 +36,8 @@ function navClass({ isActive }, collapsed) {
 
 function mobileTabClass({ isActive }) {
   return [
-    'flex flex-col items-center justify-center gap-1 min-h-14 min-w-12 px-2 py-1.5 transition-colors',
-    isActive ? 'text-accent' : 'text-ink-muted',
+    'flex flex-col items-center justify-center gap-1 min-h-14 min-w-12 px-2 py-1.5 rounded-xl transition-colors',
+    isActive ? 'text-accent font-bold' : 'text-ink-muted',
   ].join(' ')
 }
 
@@ -110,7 +109,7 @@ export default function AppShell() {
     )?.label || brandPrimary
 
   return (
-    <div className="min-h-svh bg-surface-muted text-ink md:flex">
+    <div className="min-h-svh text-ink md:flex">
       <aside
         className={[
           'sidebar-rail hidden md:flex md:flex-col md:shrink-0',
@@ -121,22 +120,21 @@ export default function AppShell() {
         <div className="sidebar-brand shrink-0">
           <div className={`flex items-center gap-2.5 ${collapsed ? 'justify-center' : ''}`}>
             <img
-              src="/icons/icon-192.png"
+              src="/icons/logo-mark-transparent.png"
               alt=""
-              className="h-9 w-9 shrink-0 rounded-xl object-contain bg-white/95 p-0.5"
+              className="h-9 w-9 shrink-0 object-contain brightness-0 invert"
             />
             {!collapsed && (
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-white leading-tight truncate">
+                <p className="text-[13px] font-semibold text-white leading-tight truncate tracking-tight">
                   {brandPrimary}
                 </p>
-                <p className="text-[10px] text-[var(--color-sidebar-muted)] mt-0.5 truncate">
-                  {t('dashboard.brokerDesk')}
+                <p className="text-[10px] text-[var(--color-sidebar-muted)] mt-0.5 truncate tracking-wide uppercase">
+                  {panelLabel}
                 </p>
               </div>
             )}
           </div>
-          <p className={`sidebar-panel-label ${collapsed ? 'is-hidden' : ''}`}>{panelLabel}</p>
         </div>
 
         <nav className="sidebar-nav flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-2 py-3">
@@ -207,20 +205,21 @@ export default function AppShell() {
       </aside>
 
       <div className="flex-1 md:min-w-0 flex flex-col min-h-svh">
-        <header className="app-topbar sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-3 md:px-8">
+        <header className="app-topbar sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-3.5 md:px-8">
           <div className="min-w-0 flex items-center gap-2.5">
             <img
-              src="/icons/icon-192.png"
+              src="/icons/logo-mark-transparent.png"
               alt=""
-              className="h-8 w-8 rounded-lg object-contain md:hidden shrink-0"
+              className="h-8 w-8 object-contain md:hidden shrink-0"
             />
             <div className="min-w-0">
               <p className="text-caption text-ink-muted truncate md:hidden">{brandPrimary}</p>
               <p className="hidden md:flex items-center gap-2 text-caption text-ink-muted">
-                <Shield size={14} className="text-accent shrink-0" />
-                <span>{panelLabel}</span>
+                <span className="inline-flex h-6 items-center rounded-full bg-accent-soft px-2.5 text-[11px] font-semibold text-accent tracking-wide">
+                  {panelLabel}
+                </span>
                 <span className="text-border">/</span>
-                <span className="text-ink font-semibold">{crumb}</span>
+                <span className="text-ink font-semibold tracking-tight">{crumb}</span>
               </p>
               <h1 className="page-title md:hidden truncate text-lg">{crumb}</h1>
             </div>
@@ -231,7 +230,7 @@ export default function AppShell() {
             <button
               type="button"
               onClick={logout}
-              className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-xl border border-border bg-surface text-caption font-semibold text-ink-muted hover:text-danger hover:border-danger/35 transition-colors"
+              className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-xl border border-border bg-white/80 text-caption font-semibold text-ink-muted hover:text-danger hover:border-danger/35 hover:bg-white transition-colors"
             >
               <LogOut size={16} strokeWidth={1.75} />
               <span className="hidden sm:inline">{t('dashboard.logout')}</span>
@@ -239,7 +238,7 @@ export default function AppShell() {
           </div>
         </header>
 
-        <main className="flex-1 px-4 pt-5 pb-28 sm:px-6 md:px-8 md:pt-7 md:pb-8">
+        <main className="flex-1 px-4 pt-5 pb-28 sm:px-6 md:px-8 md:pt-8 md:pb-10">
           <Outlet />
         </main>
       </div>

@@ -45,8 +45,9 @@ export function rangeForPreset(presetId) {
   const to = todayKeyIST()
   if (presetId === '7d') return { from: daysAgoKey(7), to, bucket: 'day' }
   if (presetId === '1m') return { from: daysAgoKey(30), to, bucket: 'week' }
-  if (presetId === '6m') return { from: monthsAgoKey(6), to, bucket: 'month' }
-  if (presetId === '1y') return { from: monthsAgoKey(12), to, bucket: 'month' }
+  if (presetId === '6m') return { from: monthsAgoKey(5), to, bucket: 'month' }
+  // Exactly 12 month buckets (e.g. Oct → Sep), not 13 (Sep → Sep).
+  if (presetId === '1y') return { from: monthsAgoKey(11), to, bucket: 'month' }
   return { from: daysAgoKey(7), to, bucket: 'day' }
 }
 
@@ -284,7 +285,7 @@ export function useDashboardSummary(fromDate, toDate, bucketMode) {
   ])
 }
 
-export function useDashboardRange(defaultPreset = '7d') {
+export function useDashboardRange(defaultPreset = '1y') {
   const initial = rangeForPreset(defaultPreset)
   const [fromDate, setFromDate] = useState(initial.from)
   const [toDate, setToDate] = useState(initial.to)

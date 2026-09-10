@@ -42,6 +42,38 @@ function DeleteUserDialog({ userLabel, busy, error, onConfirm, onCancel }) {
   )
 }
 
+function RevokeInviteDialog({ inviteLabel, busy, error, onConfirm, onCancel }) {
+  const { t } = useLocale()
+  return (
+    <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
+      <div className="card px-5 py-5 max-w-sm w-full">
+        <p className="text-body text-ink font-semibold mb-1">{t('settings.revokeInviteTitle')}</p>
+        <p className="text-caption text-ink-muted mb-2">{t('settings.revokeInviteBody')}</p>
+        <p className="text-body text-ink font-semibold mb-4">{inviteLabel}</p>
+        {error && <p className="text-caption text-danger mb-3">{error}</p>}
+        <div className="flex gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body disabled:opacity-40"
+          >
+            {busy ? t('common.loading') : t('settings.confirmRevokeInvite')}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted disabled:opacity-40"
+          >
+            {t('common.cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UserManagementScreen() {
   const { isOwner, user } = useAuth()
   const { t } = useLocale()
@@ -54,6 +86,9 @@ export default function UserManagementScreen() {
   const [deletingUser, setDeletingUser] = useState(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [revokingInvite, setRevokingInvite] = useState(null)
+  const [revokeBusy, setRevokeBusy] = useState(false)
+  const [revokeError, setRevokeError] = useState('')
 
   const pendingInvites = invites.filter((i) => i.status === 'pending')
   const ownerCount = useMemo(
@@ -103,7 +138,7 @@ export default function UserManagementScreen() {
     setDeleteBusy(true)
     setDeleteError('')
     try {
-      await deleteUser(deletingUser.id)
+      await deleteUser(deletingUser.id, { email: deletingUser.email })
       setSelectedId((id) => (id === deletingUser.id ? null : id))
       setDeletingUser(null)
     } catch (err) {
@@ -111,6 +146,21 @@ export default function UserManagementScreen() {
       setDeleteError(t('admin.deleteUserFailed'))
     } finally {
       setDeleteBusy(false)
+    }
+  }
+
+  async function handleConfirmRevoke() {
+    if (!revokingInvite || revokeBusy) return
+    setRevokeBusy(true)
+    setRevokeError('')
+    try {
+      await revokeInvite(revokingInvite)
+      setRevokingInvite(null)
+    } catch (err) {
+      console.error('Revoke invite failed:', err)
+      setRevokeError(t('settings.revokeInviteFailed'))
+    } finally {
+      setRevokeBusy(false)
     }
   }
 
@@ -152,6 +202,31 @@ export default function UserManagementScreen() {
       key: 'location',
       header: t('admin.location'),
       render: (u) => u.location || '—',
+    },
+    {
+      key: 'actions',
+      header: t('common.actions'),
+      align: 'right',
+      render: (u) => {
+        const allowed = canDeleteUser(u)
+        return (
+          <button
+            type="button"
+            disabled={!allowed}
+            title={allowed ? t('admin.deleteUser') : deleteBlockedReason(u)}
+            aria-label={t('admin.deleteUser')}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!allowed) return
+              setDeleteError('')
+              setDeletingUser(u)
+            }}
+            className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl text-ink-muted hover:text-danger hover:bg-danger/5 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
+          >
+            <Trash2 size={16} strokeWidth={1.75} />
+          </button>
+        )
+      },
     },
   ]
 
@@ -228,9 +303,9 @@ export default function UserManagementScreen() {
                     <Trash2 size={16} />
                     {t('admin.deleteUser')}
                   </button>
-                  {blocked && (
+                  {blocked ? (
                     <p className="text-caption text-ink-muted max-w-[16rem]">{blocked}</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             )
@@ -252,6 +327,20 @@ export default function UserManagementScreen() {
         />
       )}
 
+      {revokingInvite && (
+        <RevokeInviteDialog
+          inviteLabel={revokingInvite.email || revokingInvite.id}
+          busy={revokeBusy}
+          error={revokeError}
+          onConfirm={handleConfirmRevoke}
+          onCancel={() => {
+            if (revokeBusy) return
+            setRevokingInvite(null)
+            setRevokeError('')
+          }}
+        />
+      )}
+
       {!invitesLoading && (
         <div className="mt-8">
           <h2 className="text-heading font-semibold mb-3">{t('settings.pendingInvitesLabel')}</h2>
@@ -267,7 +356,10 @@ export default function UserManagementScreen() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => revokeInvite(invite.email)}
+                    onClick={() => {
+                      setRevokeError('')
+                      setRevokingInvite(invite)
+                    }}
                     className="min-h-11 min-w-11 inline-flex items-center justify-center text-ink-muted hover:text-danger"
                     aria-label={t('settings.revoke')}
                   >

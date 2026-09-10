@@ -1,13 +1,6 @@
 import { Link } from 'react-router-dom'
-import { useMemo, useState } from 'react'
-import {
-  Plus,
-  FileText,
-  BookOpen,
-  HandCoins,
-  Landmark,
-  ChevronRight,
-} from 'lucide-react'
+import { useMemo } from 'react'
+import { Plus } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useDashboardRange, DASHBOARD_PRESETS } from '../../hooks/useDashboardSummary'
 import { useLocale } from '../../context/LocaleContext'
@@ -16,6 +9,7 @@ import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import { SkeletonCard, Skeleton } from '../../components/Skeleton'
 import BarChart from '../../components/BarChart'
 import TrendChart from '../../components/TrendChart'
+import SpiderChart from '../../components/SpiderChart'
 
 function greetingKey() {
   const hour = Number(
@@ -44,37 +38,9 @@ function formatYardDate(dateKey, localeTag) {
 
 const RANGE_OPTIONS = DASHBOARD_PRESETS
 
-const BOOKS = [
-  {
-    to: '/bills',
-    icon: FileText,
-    labelKey: 'dashboard.bookMemo',
-    hintKey: 'dashboard.bookMemoHint',
-  },
-  {
-    to: '/dakhla',
-    icon: BookOpen,
-    labelKey: 'dashboard.bookDakhla',
-    hintKey: 'dashboard.bookDakhlaHint',
-  },
-  {
-    to: '/rojmer',
-    icon: HandCoins,
-    labelKey: 'dashboard.bookRojmer',
-    hintKey: 'dashboard.bookRojmerHint',
-  },
-  {
-    to: '/silak',
-    icon: Landmark,
-    labelKey: 'dashboard.bookSilak',
-    hintKey: 'dashboard.bookSilakHint',
-  },
-]
-
 export default function DashboardScreen() {
   const { user, role, canWrite, isOwner, isCa } = useAuth()
   const { t, formatCurrency, formatDigits, lang } = useLocale()
-  const [chartTab, setChartTab] = useState('income')
   const {
     loading,
     billsTodayCount,
@@ -93,7 +59,7 @@ export default function DashboardScreen() {
     toDate,
     setFromDate,
     setToDate,
-  } = useDashboardRange('7d')
+  } = useDashboardRange('1y')
 
   const today = todayKeyIST()
   const name = (user?.name || '').trim() || (user?.email || '').split('@')[0]
@@ -103,15 +69,9 @@ export default function DashboardScreen() {
 
   const barSeries = chartSeries.map((p) => ({
     label: formatDigits(p.label),
-    value: chartTab === 'income' ? p.value : p.profit,
-    value2: chartTab === 'income' ? p.value2 : undefined,
+    value: p.value,
+    value2: p.value2,
     tip: p.tip || p.date,
-    color:
-      chartTab === 'profit'
-        ? (p.profit || 0) >= 0
-          ? 'var(--color-success)'
-          : 'var(--color-danger)'
-        : undefined,
   }))
   const profitSeriesLocale = profitSeries.map((p) => ({
     ...p,
@@ -124,13 +84,65 @@ export default function DashboardScreen() {
       : 0
   const maxLabels = chartSeries.length <= 14 ? Math.max(chartSeries.length, 1) : 8
   const rankMax = Math.max(...ranking.map((r) => r.total || 0), 1)
+  const spiderSeries = useMemo(
+    () => [
+      { label: t('dashboard.spiderGoods'), value: Math.max(0, incomeTotal) },
+      { label: t('dashboard.spiderFarmerPay'), value: Math.max(0, expenseTotal) },
+      { label: t('dashboard.spiderNet'), value: Math.max(0, profitTotal) },
+      { label: t('dashboard.spiderPending'), value: Math.max(0, rojmerPendingAmount) },
+      { label: t('dashboard.spiderSilak'), value: Math.max(0, silakPosition) },
+    ],
+    [t, incomeTotal, expenseTotal, profitTotal, rojmerPendingAmount, silakPosition],
+  )
   const roleLine = [
     role ? t(`roles.${role}`) : '',
     location,
-    isOwner ? t('dashboard.brokerDesk') : isCa ? t('nav.caPanel') : t('nav.staffPanel'),
+    isOwner ? t('nav.adminPanel') : isCa ? t('nav.caPanel') : t('nav.staffPanel'),
   ]
     .filter(Boolean)
     .join(' · ')
+
+  const rangeToolbar = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex rounded-lg border border-border bg-surface p-0.5">
+        {RANGE_OPTIONS.map(({ id }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setPreset(id)}
+            className={[
+              'min-h-8 px-2 rounded-md text-[10px] font-semibold',
+              preset === id ? 'bg-surface-muted text-ink' : 'text-ink-muted hover:text-ink',
+            ].join(' ')}
+          >
+            {t(`dashboard.range${id}`)}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-surface px-1.5 py-0.5">
+        <input
+          id="dash-from"
+          type="date"
+          value={fromDate}
+          max={toDate || undefined}
+          onChange={(e) => setFromDate(e.target.value)}
+          className="min-h-7 max-w-[8.5rem] rounded-md border-0 bg-transparent px-1 text-[11px] font-numeric text-ink outline-none"
+          aria-label={t('common.from')}
+        />
+        <span className="text-[10px] text-ink-muted">–</span>
+        <input
+          id="dash-to"
+          type="date"
+          value={toDate}
+          min={fromDate || undefined}
+          max={today}
+          onChange={(e) => setToDate(e.target.value)}
+          className="min-h-7 max-w-[8.5rem] rounded-md border-0 bg-transparent px-1 text-[11px] font-numeric text-ink outline-none"
+          aria-label={t('common.to')}
+        />
+      </div>
+    </div>
+  )
 
   return (
     <div className="pb-4">
@@ -250,125 +262,33 @@ export default function DashboardScreen() {
             </div>
           </section>
 
-          {/* Four books */}
-          <section>
-            <h2 className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-              {t('dashboard.openBooks')}
-            </h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-              {BOOKS.map(({ to, icon: Icon, labelKey, hintKey }) => (
-                <Link
-                  key={to}
-                  to={to}
-                  className="group card px-3.5 py-3.5 hover:border-accent/35 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="h-9 w-9 rounded-lg bg-accent-soft text-accent inline-flex items-center justify-center">
-                      <Icon size={17} strokeWidth={1.75} />
-                    </span>
-                    <ChevronRight
-                      size={16}
-                      className="text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity mt-1"
-                    />
-                  </div>
-                  <p className="mt-3 text-body font-semibold text-ink">{t(labelKey)}</p>
-                  <p className="mt-0.5 text-[11px] text-ink-muted leading-snug">{t(hintKey)}</p>
-                </Link>
-              ))}
-            </div>
-          </section>
-
-          {/* Period movement + vepari book */}
-          <section className="grid gap-4 lg:grid-cols-12">
-            <div className="lg:col-span-8 card overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 bg-[#fafaf8]">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                    {t('dashboard.periodMovement')}
-                  </p>
-                  <p className="text-[12px] text-ink-muted mt-0.5">
-                    {chartTab === 'income'
-                      ? t('dashboard.storeTrendIncome')
-                      : t('dashboard.storeTrendProfit')}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <div className="flex rounded-lg border border-border bg-surface p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setChartTab('income')}
-                      className={[
-                        'min-h-8 px-2.5 rounded-md text-[11px] font-semibold',
-                        chartTab === 'income'
-                          ? 'bg-accent text-white'
-                          : 'text-ink-muted hover:text-ink',
-                      ].join(' ')}
-                    >
-                      {t('dashboard.tabGoodsPayout')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChartTab('profit')}
-                      className={[
-                        'min-h-8 px-2.5 rounded-md text-[11px] font-semibold',
-                        chartTab === 'profit'
-                          ? 'bg-accent text-white'
-                          : 'text-ink-muted hover:text-ink',
-                      ].join(' ')}
-                    >
-                      {t('dashboard.tabNet')}
-                    </button>
-                  </div>
-                  <div className="flex rounded-lg border border-border bg-surface p-0.5">
-                    {RANGE_OPTIONS.map(({ id }) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setPreset(id)}
-                        className={[
-                          'min-h-8 px-2 rounded-md text-[10px] font-semibold',
-                          preset === id
-                            ? 'bg-surface-muted text-ink'
-                            : 'text-ink-muted hover:text-ink',
-                        ].join(' ')}
-                      >
-                        {t(`dashboard.range${id}`)}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1 rounded-lg border border-border bg-surface px-1.5 py-0.5">
-                    <input
-                      id="dash-from"
-                      type="date"
-                      value={fromDate}
-                      max={toDate || undefined}
-                      onChange={(e) => setFromDate(e.target.value)}
-                      className="min-h-7 max-w-[8.5rem] rounded-md border-0 bg-transparent px-1 text-[11px] font-numeric text-ink outline-none"
-                      aria-label={t('common.from')}
-                    />
-                    <span className="text-[10px] text-ink-muted">–</span>
-                    <input
-                      id="dash-to"
-                      type="date"
-                      value={toDate}
-                      min={fromDate || undefined}
-                      max={today}
-                      onChange={(e) => setToDate(e.target.value)}
-                      className="min-h-7 max-w-[8.5rem] rounded-md border-0 bg-transparent px-1 text-[11px] font-numeric text-ink outline-none"
-                      aria-label={t('common.to')}
-                    />
-                  </div>
-                </div>
+          {/* Bar + line charts */}
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
+                  {t('dashboard.chartsTitle')}
+                </h2>
+                <p className="text-[12px] text-ink-muted mt-0.5">
+                  {t('dashboard.chartsHint', { period: periodLabel })}
+                </p>
               </div>
+              {rangeToolbar}
+            </div>
 
-              <div className="px-4 py-4">
-                <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-                  <p className="font-numeric text-2xl font-bold text-ink leading-none">
-                    {chartTab === 'income'
-                      ? formatCurrency(incomeTotal)
-                      : formatCurrency(profitTotal)}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="card overflow-hidden">
+                <div className="border-b border-border px-4 py-3 bg-[#fafaf8]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                    {t('dashboard.barChartTitle')}
                   </p>
-                  {chartTab === 'income' && (
+                  <p className="text-[12px] text-ink-muted mt-0.5">{t('dashboard.storeTrendIncome')}</p>
+                </div>
+                <div className="px-4 py-4">
+                  <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                    <p className="font-numeric text-2xl font-bold text-ink leading-none">
+                      {formatCurrency(incomeTotal)}
+                    </p>
                     <div className="flex items-center gap-3 text-[11px] text-ink-muted">
                       <span className="inline-flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-[2px] bg-accent" />
@@ -379,112 +299,128 @@ export default function DashboardScreen() {
                         {t('dashboard.legendFarmerPay')}
                       </span>
                     </div>
-                  )}
+                  </div>
+                  <BarChart
+                    series={barSeries}
+                    height={240}
+                    maxLabels={maxLabels}
+                    emptyLabel={t('dashboard.chartEmpty')}
+                    formatValue={formatCurrency}
+                    barColor="var(--color-accent)"
+                  />
                 </div>
-                <BarChart
-                  series={barSeries}
-                  height={228}
-                  maxLabels={maxLabels}
+              </div>
+
+              <div className="card overflow-hidden">
+                <div className="border-b border-border px-4 py-3 bg-[#fafaf8]">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                        {t('dashboard.lineChartTitle')}
+                      </p>
+                      <p className="text-[12px] text-ink-muted mt-0.5">
+                        {t('dashboard.storeTrendProfit')}
+                      </p>
+                    </div>
+                    <span
+                      className={`font-numeric text-lg font-bold ${
+                        profitTotal >= 0 ? 'text-success' : 'text-danger'
+                      }`}
+                    >
+                      {formatCurrency(profitTotal)}
+                    </span>
+                  </div>
+                </div>
+                <div className="px-4 py-4">
+                  <TrendChart
+                    series={profitSeriesLocale}
+                    stroke={profitTotal >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}
+                    fill={profitTotal >= 0 ? '#e8f2ea' : '#f8e8e6'}
+                    emptyLabel={t('dashboard.chartEmpty')}
+                    height={240}
+                  />
+                  <div className="mt-3 flex items-center justify-between text-[11px] text-ink-muted">
+                    <span>{t('dashboard.marginLabel')}</span>
+                    <span className="font-numeric font-semibold text-ink">
+                      {formatDigits(netShare)}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1 rounded-full bg-surface-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-accent"
+                      style={{ width: `${netShare}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Yard spider + vepari book */}
+          <section className="grid gap-4 lg:grid-cols-12">
+            <div className="lg:col-span-7 card overflow-hidden">
+              <div className="border-b border-border px-4 py-3 bg-[#fafaf8]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+                  {t('dashboard.spiderTitle')}
+                </p>
+                <p className="text-[12px] text-ink-muted mt-0.5">{t('dashboard.spiderHint')}</p>
+              </div>
+              <div className="px-4 py-4">
+                <SpiderChart
+                  series={spiderSeries}
+                  size={300}
                   emptyLabel={t('dashboard.chartEmpty')}
                   formatValue={formatCurrency}
-                  barColor="var(--color-accent)"
                 />
               </div>
             </div>
 
-            <div className="lg:col-span-4 flex flex-col gap-4">
-              <div className="card px-4 py-4 flex-1">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                      {t('dashboard.vepariBook')}
-                    </p>
-                    <p className="text-[12px] text-ink-muted mt-0.5">
-                      {t('dashboard.vepariBookHint')}
-                    </p>
-                  </div>
-                  <Link
-                    to="/dakhla"
-                    className="text-[11px] font-semibold text-accent hover:underline"
-                  >
-                    {t('dashboard.open')}
-                  </Link>
-                </div>
-                {ranking.length === 0 ? (
-                  <p className="text-caption text-ink-muted py-6 text-center">
-                    {t('dashboard.chartEmpty')}
-                  </p>
-                ) : (
-                  <ol className="space-y-3">
-                    {ranking.slice(0, 5).map((row, i) => (
-                      <li key={row.vepariId || i}>
-                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                          <div className="min-w-0 flex items-baseline gap-2">
-                            <span className="font-numeric text-[11px] text-ink-muted w-4 shrink-0">
-                              {formatDigits(i + 1)}.
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-[13px] font-semibold text-ink truncate">
-                                {row.name}
-                              </p>
-                              {row.village ? (
-                                <p className="text-[11px] text-ink-muted truncate">
-                                  {row.village}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
-                          <p className="font-numeric text-[12px] font-semibold text-ink shrink-0">
-                            {formatCurrency(row.total)}
-                          </p>
-                        </div>
-                        <div className="ml-6 h-1 rounded-full bg-surface-muted overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-accent/75"
-                            style={{
-                              width: `${Math.max(6, (row.total / rankMax) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-
-              <div className="card px-4 py-4">
-                <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="lg:col-span-5 card px-4 py-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-                    {t('dashboard.netTrend')}
+                    {t('dashboard.vepariBook')}
                   </p>
-                  <span
-                    className={`font-numeric text-sm font-semibold ${
-                      profitTotal >= 0 ? 'text-success' : 'text-danger'
-                    }`}
-                  >
-                    {formatCurrency(profitTotal)}
-                  </span>
+                  <p className="text-[12px] text-ink-muted mt-0.5">{t('dashboard.vepariBookHint')}</p>
                 </div>
-                <TrendChart
-                  series={profitSeriesLocale}
-                  stroke={profitTotal >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}
-                  fill={profitTotal >= 0 ? '#e8f2ea' : '#f8e8e6'}
-                  emptyLabel={t('dashboard.chartEmpty')}
-                  height={100}
-                />
-                <div className="mt-2.5 flex items-center justify-between text-[11px] text-ink-muted">
-                  <span>{t('dashboard.marginLabel')}</span>
-                  <span className="font-numeric font-semibold text-ink">
-                    {formatDigits(netShare)}%
-                  </span>
-                </div>
-                <div className="mt-1.5 h-1 rounded-full bg-surface-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-accent"
-                    style={{ width: `${netShare}%` }}
-                  />
-                </div>
+                <Link to="/dakhla" className="text-[11px] font-semibold text-accent hover:underline">
+                  {t('dashboard.open')}
+                </Link>
               </div>
+              {ranking.length === 0 ? (
+                <p className="text-caption text-ink-muted py-6 text-center">{t('dashboard.chartEmpty')}</p>
+              ) : (
+                <ol className="space-y-3">
+                  {ranking.slice(0, 6).map((row, i) => (
+                    <li key={row.vepariId || i}>
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <div className="min-w-0 flex items-baseline gap-2">
+                          <span className="font-numeric text-[11px] text-ink-muted w-4 shrink-0">
+                            {formatDigits(i + 1)}.
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[13px] font-semibold text-ink truncate">{row.name}</p>
+                            {row.village ? (
+                              <p className="text-[11px] text-ink-muted truncate">{row.village}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                        <p className="font-numeric text-[12px] font-semibold text-ink shrink-0">
+                          {formatCurrency(row.total)}
+                        </p>
+                      </div>
+                      <div className="ml-6 h-1 rounded-full bg-surface-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-accent/75"
+                          style={{
+                            width: `${Math.max(6, (row.total / rankMax) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </section>
         </div>

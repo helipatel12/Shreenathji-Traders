@@ -13,12 +13,47 @@ import { useInvites } from '../../hooks/useInvites'
 import { useLocale } from '../../context/LocaleContext'
 import InviteForm from './InviteForm'
 
+function RevokeInviteDialog({ inviteLabel, busy, error, onConfirm, onCancel }) {
+  const { t } = useLocale()
+  return (
+    <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
+      <div className="card px-5 py-5 max-w-sm w-full">
+        <p className="text-body text-ink font-semibold mb-1">{t('settings.revokeInviteTitle')}</p>
+        <p className="text-caption text-ink-muted mb-2">{t('settings.revokeInviteBody')}</p>
+        <p className="text-body text-ink font-semibold mb-4">{inviteLabel}</p>
+        {error && <p className="text-caption text-danger mb-3">{error}</p>}
+        <div className="flex gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body disabled:opacity-40"
+          >
+            {busy ? t('common.loading') : t('settings.confirmRevokeInvite')}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted disabled:opacity-40"
+          >
+            {t('common.cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UsersSection() {
   const { t } = useLocale()
   const { user } = useAuth()
   const { users, loading: usersLoading } = useUsers()
   const { invites, loading: invitesLoading, addInvite, revokeInvite } = useInvites()
   const [showInviteForm, setShowInviteForm] = useState(false)
+  const [revokingInvite, setRevokingInvite] = useState(null)
+  const [revokeBusy, setRevokeBusy] = useState(false)
+  const [revokeError, setRevokeError] = useState('')
 
   const pendingInvites = invites.filter((i) => i.status === 'pending')
 
@@ -29,6 +64,21 @@ export default function UsersSection() {
   async function handleInvite(values) {
     await addInvite({ ...values, invitedBy: user?.email })
     setShowInviteForm(false)
+  }
+
+  async function handleConfirmRevoke() {
+    if (!revokingInvite || revokeBusy) return
+    setRevokeBusy(true)
+    setRevokeError('')
+    try {
+      await revokeInvite(revokingInvite)
+      setRevokingInvite(null)
+    } catch (err) {
+      console.error('Revoke invite failed:', err)
+      setRevokeError(t('settings.revokeInviteFailed'))
+    } finally {
+      setRevokeBusy(false)
+    }
   }
 
   return (
@@ -88,7 +138,10 @@ export default function UsersSection() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => revokeInvite(invite.email)}
+                    onClick={() => {
+                      setRevokeError('')
+                      setRevokingInvite(invite)
+                    }}
                     aria-label={`${t('settings.revoke')} ${invite.email}`}
                     className="min-h-12 min-w-12 inline-flex items-center justify-center text-ink-muted hover:text-danger shrink-0"
                   >
@@ -99,6 +152,20 @@ export default function UsersSection() {
             </ul>
           )}
         </div>
+      )}
+
+      {revokingInvite && (
+        <RevokeInviteDialog
+          inviteLabel={revokingInvite.email || revokingInvite.id}
+          busy={revokeBusy}
+          error={revokeError}
+          onConfirm={handleConfirmRevoke}
+          onCancel={() => {
+            if (revokeBusy) return
+            setRevokingInvite(null)
+            setRevokeError('')
+          }}
+        />
       )}
     </div>
   )

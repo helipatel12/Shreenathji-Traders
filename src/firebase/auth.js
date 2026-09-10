@@ -34,12 +34,68 @@ function appContinueUrl(extraQuery = '') {
 
 /** Shared ActionCodeSettings for verification / reset (web handler first). */
 function emailActionSettings(mode) {
+  const verifyInApp = mode === 'verifyEmail'
   return {
     url: appContinueUrl(mode ? `mode=${mode}` : ''),
-    // false = Firebase hosted page applies the code, then returns here.
-    // true is for mobile Universal Links and often breaks plain web apps.
-    handleCodeInApp: false,
+    // verifyEmail: open this app with oobCode so the user can paste/enter
+    // the code on the website (or auto-apply when they open the link).
+    // resetPassword: Firebase hosted page still works; user can also paste code.
+    handleCodeInApp: verifyInApp,
   }
+}
+
+const VERIFY_SENT_KEY = 'st_verify_email_sent'
+
+export function markVerificationEmailSent(email) {
+  try {
+    const key = String(email || '').trim().toLowerCase()
+    if (!key) return
+    sessionStorage.setItem(`${VERIFY_SENT_KEY}:${key}`, String(Date.now()))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** True if we already sent a verification email for this address recently. */
+export function wasVerificationEmailSentRecently(email, withinMs = 10 * 60 * 1000) {
+  try {
+    const key = String(email || '').trim().toLowerCase()
+    if (!key) return false
+    const raw = sessionStorage.getItem(`${VERIFY_SENT_KEY}:${key}`)
+    const sentAt = Number(raw || 0)
+    return Number.isFinite(sentAt) && Date.now() - sentAt < withinMs
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Pull Firebase oobCode from a pasted link or raw code.
+ * Emails contain …?mode=verifyEmail&oobCode=XXXX — users may paste either.
+ */
+export function extractOobCode(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const match = raw.match(/[?&#]oobCode=([^&#\s]+)/i)
+  if (match?.[1]) {
+    try {
+      return decodeURIComponent(match[1])
+    } catch {
+      return match[1]
+    }
+  }
+  return raw
+}
+
+/** Apply email verification using a pasted code or full inbox link. */
+export async function verifyEmailWithCode(codeOrLink) {
+  const oobCode = extractOobCode(codeOrLink)
+  if (!oobCode || oobCode.length < 8) {
+    const err = new Error('Invalid verification code')
+    err.code = 'auth/invalid-action-code'
+    throw err
+  }
+  await applyEmailVerificationCode(oobCode)
 }
 
 /** Map Firebase Auth error codes → i18n keys under `auth.*`. */
@@ -75,7 +131,7 @@ export function authErrorLocaleKey(err) {
     code.includes('invalid-action-code') ||
     code.includes('expired-action-code')
   ) {
-    return 'auth.errInvalidResetCode'
+    return 'auth.errInvalidCode'
   }
   if (code.includes('account-exists-with-different-credential')) {
     return 'auth.errAccountExists'
@@ -91,6 +147,7 @@ export async function signUp(email, password) {
   )
   // Do not swallow — callers need to show why the inbox stayed empty.
   await sendEmailVerification(credential.user, emailActionSettings('verifyEmail'))
+  markVerificationEmailSent(credential.user.email)
   return credential.user
 }
 
@@ -99,6 +156,7 @@ export async function resendEmailVerification() {
   if (!user) throw new Error('Not signed in')
   if (user.emailVerified) return
   await sendEmailVerification(user, emailActionSettings('verifyEmail'))
+  markVerificationEmailSent(user.email)
 }
 
 export async function signIn(email, password) {

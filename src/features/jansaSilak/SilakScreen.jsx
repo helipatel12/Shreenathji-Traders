@@ -115,11 +115,10 @@ function DayEntriesBreakdown({ day, currentUser }) {
   )
 }
 
-function DayView() {
+function DayView({ mode, setMode }) {
   const { user, canWrite, isOwner } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const [date, setDate] = useState(todayKeyIST())
-  const [mode, setMode] = useState('list')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [selectedKey, setSelectedKey] = useState(null)
   const [search, setSearch] = useState('')
@@ -281,15 +280,6 @@ function DayView() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        {mode === 'list' && canWrite && (
-          <button type="button" onClick={() => setMode('add')} className="btn-primary ml-auto">
-            <Plus size={18} strokeWidth={2} />
-            {t('silak.addManualEntry')}
-          </button>
-        )}
-      </div>
-
       {mode === 'add' && canWrite && (
         <div className="card px-5 py-5 mb-4">
           <ManualEntryForm defaultDate={date} onSubmit={handleAdd} onCancel={() => setMode('list')} />
@@ -626,13 +616,29 @@ export default function SilakScreen() {
   const { canWrite } = useAuth()
   const { t } = useLocale()
   const [tab, setTab] = useState('day')
+  const [mode, setMode] = useState('list')
+
+  function selectTab(next) {
+    setTab(next)
+    setMode('list')
+  }
 
   return (
     <div>
       {!canWrite && <ReadOnlyBanner />}
 
-      <h1 className="page-title">{t('silak.title')}</h1>
-      <p className="text-body text-ink-muted mt-1 mb-4">{t('nav.silak')}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 className="page-title">{t('silak.title')}</h1>
+          <p className="text-body text-ink-muted mt-1">{t('nav.silak')}</p>
+        </div>
+        {canWrite && tab === 'day' && mode === 'list' && (
+          <button type="button" onClick={() => setMode('add')} className="btn-primary">
+            <Plus size={18} strokeWidth={2} />
+            {t('silak.addManualEntry')}
+          </button>
+        )}
+      </div>
 
       <div className="flex gap-1 mb-6 border-b border-border">
         {[
@@ -643,7 +649,7 @@ export default function SilakScreen() {
           <button
             key={key}
             type="button"
-            onClick={() => setTab(key)}
+            onClick={() => selectTab(key)}
             className={`px-4 py-2.5 text-body -mb-px border-b-2 min-h-12 ${
               tab === key ? 'border-accent text-accent font-semibold' : 'border-transparent text-ink-muted'
             }`}
@@ -653,7 +659,7 @@ export default function SilakScreen() {
         ))}
       </div>
 
-      {tab === 'day' ? <DayView /> : <RangeView key={tab} mode={tab} />}
+      {tab === 'day' ? <DayView mode={mode} setMode={setMode} /> : <RangeView key={tab} mode={tab} />}
     </div>
   )
 }

@@ -21,14 +21,18 @@ import {
   getAuthActionFromUrl,
   clearAuthActionFromUrl,
   applyEmailVerificationCode,
+  verifyEmailWithCode,
+  wasVerificationEmailSentRecently,
   authErrorLocaleKey,
 } from './firebase/auth'
 
 function UnauthorizedScreen({ reason = 'unauthorized' }) {
-  const { logout, authReason, confirmEmailVerified } = useAuth()
+  const { logout, authReason, confirmEmailVerified, firebaseUser } = useAuth()
   const { t } = useLocale()
   const [info, setInfo] = useState('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [verifyCode, setVerifyCode] = useState('')
   const title =
     reason === 'unverified' ? t('auth.unverifiedTitle') : t('auth.unauthorizedTitle')
   const body =
@@ -37,6 +41,31 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       : authReason === 'phone-needs-email'
         ? t('auth.phoneNeedsEmailInvite')
         : t('auth.unauthorizedBody')
+
+  // Auto-send verification email when landing on this screen (skip if just sent).
+  useEffect(() => {
+    if (reason !== 'unverified') return
+    const email = firebaseUser?.email || ''
+    if (wasVerificationEmailSentRecently(email)) {
+      setInfo(t('auth.verificationSent'))
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        await resendEmailVerification()
+        if (!cancelled) setInfo(t('auth.verificationSent'))
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Auto-send verification failed:', err)
+          setError(t(authErrorLocaleKey(err)))
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [reason, firebaseUser?.email, t])
 
   // If the inbox verification link opens while stuck on this screen, apply it.
   useEffect(() => {
@@ -49,16 +78,17 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       let cancelled = false
       ;(async () => {
         setBusy(true)
+        setError('')
         try {
           clearAuthActionFromUrl()
           const result = await confirmEmailVerified()
           if (cancelled) return
           if (!result?.ok && result?.reason === 'still-unverified') {
-            setInfo(t('auth.stillUnverified'))
+            setError(t('auth.stillUnverified'))
           }
         } catch (err) {
           if (cancelled) return
-          setInfo(t(authErrorLocaleKey(err)))
+          setError(t(authErrorLocaleKey(err)))
         } finally {
           if (!cancelled) setBusy(false)
         }
@@ -71,18 +101,19 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
     let cancelled = false
     ;(async () => {
       setBusy(true)
+      setError('')
       try {
         await applyEmailVerificationCode(action.oobCode)
         if (cancelled) return
         clearAuthActionFromUrl()
         const result = await confirmEmailVerified()
         if (!result?.ok && result?.reason === 'still-unverified') {
-          setInfo(t('auth.stillUnverified'))
+          setError(t('auth.stillUnverified'))
         }
       } catch (err) {
         if (cancelled) return
         console.error('Verify link on unauthorized screen failed:', err)
-        setInfo(t(authErrorLocaleKey(err)))
+        setError(t(authErrorLocaleKey(err)))
         clearAuthActionFromUrl()
       } finally {
         if (!cancelled) setBusy(false)
@@ -96,36 +127,42 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
   async function handleResend() {
     if (busy) return
     setBusy(true)
+    setError('')
     setInfo('')
     try {
       await resendEmailVerification()
       setInfo(t('auth.verificationResent'))
     } catch (err) {
       console.error('Resend verification failed:', err)
-      setInfo(t(authErrorLocaleKey(err)))
+      setError(t(authErrorLocaleKey(err)))
     } finally {
       setBusy(false)
     }
   }
 
-  async function handleVerified() {
+  async function handleVerifyCode(e) {
+    e?.preventDefault?.()
     if (busy) return
+    if (!String(verifyCode || '').trim()) {
+      setError(t('auth.errInvalidCode'))
+      return
+    }
     setBusy(true)
+    setError('')
     setInfo('')
     try {
+      await verifyEmailWithCode(verifyCode)
       const result = await confirmEmailVerified()
       if (!result?.ok) {
         if (result?.reason === 'still-unverified') {
-          setInfo(t('auth.stillUnverified'))
-        } else if (result?.reason === 'unauthorized') {
-          // App will switch to unauthorized screen via status.
-        } else {
-          setInfo(t('auth.errorBody'))
+          setError(t('auth.stillUnverified'))
+        } else if (result?.reason !== 'unauthorized') {
+          setError(t('auth.errorBody'))
         }
       }
     } catch (err) {
-      console.error('Verify check failed:', err)
-      setInfo(err?.message || t('auth.errorBody'))
+      console.error('Verify code failed:', err)
+      setError(t(authErrorLocaleKey(err)))
     } finally {
       setBusy(false)
     }
@@ -136,37 +173,56 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       <div className="absolute top-4 right-4">
         <LanguageToggle />
       </div>
-        <div className="w-full max-w-sm card px-6 py-8 text-center shadow-[var(--shadow-raised)]">
-        <p className="section-label text-danger mb-2">
-          {title}
-        </p>
+      <div className="w-full max-w-sm card px-6 py-8 text-center shadow-[var(--shadow-raised)]">
+        <p className="section-label text-danger mb-2">{title}</p>
         <p className="text-body text-ink">{body}</p>
-        {info && <p className="text-caption text-ink-muted mt-3">{info}</p>}
+        {reason === 'unverified' && firebaseUser?.email && (
+          <p className="text-caption text-ink-muted mt-2 font-medium break-all">
+            {firebaseUser.email}
+          </p>
+        )}
+        {info && !error && <p className="text-caption text-success mt-3">{info}</p>}
+        {error && <p className="text-caption text-danger mt-3">{error}</p>}
+
         {reason === 'unverified' && (
-          <>
+          <form onSubmit={handleVerifyCode} className="mt-5 text-left space-y-3">
+            <div>
+              <label htmlFor="email-verify-code" className="block text-caption text-ink-muted mb-1.5">
+                {t('auth.verifyCodeLabel')}
+              </label>
+              <input
+                id="email-verify-code"
+                type="text"
+                value={verifyCode}
+                onChange={(e) => setVerifyCode(e.target.value)}
+                autoComplete="one-time-code"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder={t('auth.verifyCodePlaceholder')}
+                disabled={busy}
+                className="w-full text-body text-ink bg-surface border border-border rounded-xl py-3 px-3 min-h-12"
+              />
+              <p className="text-caption text-ink-muted mt-1.5">{t('auth.verifyCodeHint')}</p>
+            </div>
             <button
-              type="button"
-              disabled={busy}
-              onClick={handleVerified}
-              className="btn-primary w-full mt-4 disabled:opacity-40"
+              type="submit"
+              disabled={busy || !String(verifyCode || '').trim()}
+              className="btn-primary w-full disabled:opacity-40"
             >
-              {busy ? t('auth.checkingVerification') : t('auth.iVerified')}
+              {busy ? t('auth.checkingVerification') : t('auth.verifyAndContinue')}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={handleResend}
-              className="btn-secondary w-full mt-3 disabled:opacity-40"
+              className="btn-secondary w-full disabled:opacity-40"
             >
               {t('auth.resendVerification')}
             </button>
-          </>
+          </form>
         )}
-        <button
-          type="button"
-          onClick={logout}
-          className="btn-primary w-full mt-3"
-        >
+
+        <button type="button" onClick={logout} className="btn-primary w-full mt-3">
           {t('auth.tryDifferentAccount')}
         </button>
       </div>
