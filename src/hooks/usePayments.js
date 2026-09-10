@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
 import { paymentCollectionRef, paymentDocRef } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
@@ -57,13 +57,14 @@ export function usePayments() {
     }
   }, [refreshLocal])
 
-  async function addPayment({ billId, amount, type, date, createdBy }) {
+  async function addPayment({ billId, amount, type, date, createdBy, createdByName }) {
     const payload = {
       billId,
       amount: parseLocaleNumber(amount),
       type,
       date,
       createdBy,
+      createdByName: String(createdByName || '').trim() || null,
       editHistory: [],
     }
     const ref = doc(paymentCollectionRef())
@@ -116,41 +117,22 @@ export function usePayments() {
     }
   }
 
-  async function voidPayment(localId, reason, voidedBy) {
+  async function deletePayment(localId) {
     const existing = await localDb.payments.get(localId)
-    if (!existing || existing.isVoided) return
-    const voidedAt = new Date().toISOString()
-    const historyEntry = {
-      field: 'isVoided',
-      oldValue: false,
-      newValue: true,
-      editedBy: voidedBy,
-      editedAt: voidedAt,
+    if (!existing) return
+    if (!existing.firestoreId) {
+      await localDb.payments.delete(localId)
+      await refreshLocal()
+      return
     }
-    const syncRevision = nextSyncRevision(existing)
-    const changes = {
-      isVoided: true,
-      voidReason: reason || '',
-      voidedBy,
-      voidedAt,
-      editHistory: [...(existing.editHistory || []), historyEntry],
-    }
-    await localDb.payments.update(localId, {
-      ...changes,
-      syncRevision,
-      syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
-    })
+    await localDb.payments.update(localId, { syncStatus: 'pendingDelete' })
     await refreshLocal()
-    if (existing.firestoreId) {
-      try {
-        await updateDoc(paymentDocRef(existing.firestoreId), changes)
-        await markSyncedIfUnchanged(localDb.payments, localId, syncRevision)
-        await refreshLocal()
-      } catch (err) {
-        console.error('Payment void queued locally — Firestore sync failed:', err)
-      }
+    try {
+      await deleteDoc(paymentDocRef(existing.firestoreId))
+    } catch (err) {
+      console.error('Payment delete queued locally — Firestore sync failed:', err)
     }
   }
 
-  return { payments, loading, addPayment, updatePayment, voidPayment }
+  return { payments, loading, addPayment, updatePayment, deletePayment, voidPayment: deletePayment }
 }

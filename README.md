@@ -35,7 +35,7 @@ Also included:
 - **UI:** React 19, Vite 8, Tailwind CSS 4, React Router
 - **Data:** Firebase Auth, Cloud Firestore, Dexie
 - **Forms:** React Hook Form + Zod
-- **Exports:** SheetJS (xlsx), jsPDF, JSZip
+- **Exports:** ExcelJS (.xlsx), jsPDF, JSZip
 - **PWA:** vite-plugin-pwa
 
 ---

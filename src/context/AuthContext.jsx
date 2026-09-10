@@ -193,7 +193,7 @@ export function AuthProvider({ children }) {
     return record
   }, [])
 
-  const updateOwnProfile = useCallback(async ({ name, gender, birthday, email }) => {
+  const updateOwnProfile = useCallback(async ({ name, gender, birthday, email, location }) => {
     const fb = auth.currentUser
     if (!fb) throw new Error('Not signed in')
 
@@ -208,6 +208,7 @@ export function AuthProvider({ children }) {
       gender: String(gender || '').trim(),
       birthday: String(birthday || '').trim(),
       email: nextEmail || currentEmail,
+      location: String(location || '').trim(),
     }
     await updateDoc(userRef(fb.uid), patch)
     setUserRecord((prev) => (prev ? { ...prev, ...patch } : prev))

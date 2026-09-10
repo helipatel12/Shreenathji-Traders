@@ -4,6 +4,7 @@
 
 import { useMemo, useState } from 'react'
 import { FileBarChart2 } from 'lucide-react'
+import { useAuth } from '../../hooks/useAuth'
 import { useCaReport } from '../../hooks/useCaReport'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
@@ -14,6 +15,7 @@ import ExportMenu from '../../components/ExportMenu'
 import PrintButton from '../../components/PrintButton'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
+import CreatedByLine from '../../components/CreatedByLine'
 import { SkeletonTable, SkeletonCard } from '../../components/Skeleton'
 import { printBill } from '../bills/billPrint'
 import {
@@ -38,6 +40,7 @@ function Metric({ label, value }) {
 }
 
 export default function ReportsScreen() {
+  const { user } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { business } = useBusiness()
   const fy = useMemo(() => financialYearBounds(todayKeyIST()), [])
@@ -499,9 +502,12 @@ export default function ReportsScreen() {
                   {formatCurrency(row.totals.commission)}
                 </p>
               ) : (
-                <p className="text-caption text-ink-muted">
-                  {row.bill.farmerName} · {row.vepariName} · {formatCurrency(row.bill.totalAmount)}
-                </p>
+                <div className="space-y-2">
+                  <p className="text-caption text-ink-muted">
+                    {row.bill.farmerName} · {row.vepariName} · {formatCurrency(row.bill.totalAmount)}
+                  </p>
+                  <CreatedByLine record={row.bill} currentUser={user} />
+                </div>
               )
             }
           />

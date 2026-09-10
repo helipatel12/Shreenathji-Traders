@@ -18,6 +18,7 @@ import {
   summarizeVepariDayClearing,
 } from '../../utils/calc'
 import { findVepari, vepariDisplayName, vepariStableId } from '../../utils/vepari'
+import { resolveCreatedByName } from '../../utils/createdBy'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import PaymentForm from '../rojmer/PaymentForm'
 import ExportMenu from '../../components/ExportMenu'
@@ -30,7 +31,7 @@ import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { buildVepariPayRows, buildVepariPayPdfColumns } from './vepariPayExport'
 
-function GroupPayments({ billIds, payments, canWrite, isOwner, onEditPayment, onVoidPayment }) {
+function GroupPayments({ billIds, payments, canWrite, isOwner, currentUser, onEditPayment, onVoidPayment }) {
   const { t, formatCurrency, formatDate, formatDigits } = useLocale()
   const idSet = new Set(billIds)
   const groupPayments = payments
@@ -52,6 +53,7 @@ function GroupPayments({ billIds, payments, canWrite, isOwner, onEditPayment, on
           <span className={`text-ink ${payment.isVoided ? 'line-through' : ''}`}>
             {formatCurrency(payment.amount)} · {t(`vepariPay.${payment.type}`)} ·{' '}
             {formatDate(payment.date)}
+            {` · ${t('common.createdBy')} ${resolveCreatedByName(payment, currentUser)}`}
             {payment.isVoided ? ` · ${t('common.voided')}` : ''}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
@@ -76,7 +78,7 @@ function GroupPayments({ billIds, payments, canWrite, isOwner, onEditPayment, on
                 <button
                   type="button"
                   onClick={() => onVoidPayment(payment)}
-                  aria-label={t('vepariPay.void')}
+                  aria-label={t('vepariPay.delete')}
                   className="min-h-12 min-w-12 inline-flex items-center justify-center text-ink-muted hover:text-danger"
                 >
                   <Ban size={14} strokeWidth={1.75} />
@@ -92,28 +94,18 @@ function GroupPayments({ billIds, payments, canWrite, isOwner, onEditPayment, on
 
 function VoidConfirmDialog({ onConfirm, onCancel }) {
   const { t } = useLocale()
-  const [reason, setReason] = useState('')
   return (
     <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
       <div className="card px-5 py-5 max-w-sm w-full">
-        <p className="text-body text-ink font-semibold mb-1">{t('vepariPay.voidConfirmTitle')}</p>
-        <p className="text-caption text-ink-muted mb-4">{t('vepariPay.voidConfirmBody')}</p>
-        <label htmlFor="void-reason-vepari" className="block text-caption text-ink-muted mb-1.5">
-          {t('vepariPay.voidReasonLabel')}
-        </label>
-        <input
-          id="void-reason-vepari"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          className="text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 mb-4 focus:border-accent focus:ring-2 focus:ring-accent-soft"
-        />
+        <p className="text-body text-ink font-semibold mb-1">{t('vepariPay.deleteConfirmTitle')}</p>
+        <p className="text-caption text-ink-muted mb-4">{t('vepariPay.deleteConfirmBody')}</p>
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => onConfirm(reason)}
+            onClick={() => onConfirm()}
             className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body"
           >
-            {t('vepariPay.confirmVoid')}
+            {t('vepariPay.confirmDelete')}
           </button>
           <button
             type="button"
@@ -185,7 +177,7 @@ export default function VepariPayScreen() {
     loading: paymentsLoading,
     addPayment,
     updatePayment,
-    voidPayment,
+    deletePayment,
   } = useVepariPayments()
   const { veparis } = useVeparis()
   const { business } = useBusiness()
@@ -276,6 +268,7 @@ export default function VepariPayScreen() {
         type: values.type,
         date: values.date,
         createdBy: user?.email,
+        createdByName: user?.name || user?.email || '',
       })
     }
     setAddingPayment(false)
@@ -305,8 +298,8 @@ export default function VepariPayScreen() {
     setEditingPayment(null)
   }
 
-  async function handleConfirmVoid(reason) {
-    await voidPayment(voidingPayment.id, reason, user?.email)
+  async function handleConfirmVoid() {
+    await deletePayment(voidingPayment.id)
     setVoidingPayment(null)
   }
 
@@ -596,6 +589,9 @@ export default function VepariPayScreen() {
                           · {t('vepariPay.balanceLabel')} {formatCurrency(line.balance)}
                         </span>
                       )}
+                      <span className="block text-ink-muted">
+                        {t('common.createdBy')}: {resolveCreatedByName(line.bill, user)}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -604,6 +600,7 @@ export default function VepariPayScreen() {
                   payments={payments}
                   canWrite={canWrite}
                   isOwner={isOwner}
+                  currentUser={user}
                   onEditPayment={(payment) => setEditingPayment({ groupKey: row.key, payment })}
                   onVoidPayment={(payment) => setVoidingPayment(payment)}
                 />

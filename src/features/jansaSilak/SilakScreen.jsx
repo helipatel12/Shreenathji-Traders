@@ -15,8 +15,10 @@ import PrintButton from '../../components/PrintButton'
 import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
+import CreatedByLine from '../../components/CreatedByLine'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
+import { resolveCreatedByName } from '../../utils/createdBy'
 import {
   buildDayRows,
   buildDayPdfColumns,
@@ -25,7 +27,7 @@ import {
 } from './silakExport'
 
 /** Expanded month/year row — lists every line that makes up જમા / ઉધાર. */
-function DayEntriesBreakdown({ day }) {
+function DayEntriesBreakdown({ day, currentUser }) {
   const { t, formatCurrency } = useLocale()
 
   const entries = day?.entries || []
@@ -62,6 +64,11 @@ function DayEntriesBreakdown({ day }) {
                   {entry.isManual ? (
                     <span className="badge badge-gray mt-1">{t('silak.manualBadge')}</span>
                   ) : null}
+                  {(entry.createdByName || entry.createdBy) && (
+                    <p className="text-caption text-ink-muted mt-1">
+                      {t('common.createdBy')}: {resolveCreatedByName(entry, currentUser)}
+                    </p>
+                  )}
                 </div>
                 <p className={`shrink-0 font-numeric font-semibold ${amountClass}`}>
                   {tone === 'success' ? '+' : '−'}
@@ -135,7 +142,11 @@ function DayView() {
   }, [day, search, sideFilter])
 
   async function handleAdd(values) {
-    await addEntry({ ...values, createdBy: user?.email })
+    await addEntry({
+      ...values,
+      createdBy: user?.email,
+      createdByName: user?.name || user?.email || '',
+    })
     setMode('list')
   }
 
@@ -358,11 +369,16 @@ function DayView() {
               />
             }
             renderExpanded={(entry) => (
-              <p className="text-caption text-ink-muted">
-                {entry.side === 'jama' ? t('silak.jamaLabel') : t('silak.udharLabel')} ·{' '}
-                {formatCurrency(entry.amount)}
-                {entry.isManual ? ` · ${t('silak.manualBadge')}` : ''}
-              </p>
+              <div className="space-y-2">
+                <p className="text-caption text-ink-muted">
+                  {entry.side === 'jama' ? t('silak.jamaLabel') : t('silak.udharLabel')} ·{' '}
+                  {formatCurrency(entry.amount)}
+                  {entry.isManual ? ` · ${t('silak.manualBadge')}` : ''}
+                </p>
+                {(entry.createdByName || entry.createdBy) && (
+                  <CreatedByLine record={entry} currentUser={user} />
+                )}
+              </div>
             )}
           />
 
@@ -417,6 +433,7 @@ function DayView() {
 }
 
 function RangeView({ mode }) {
+  const { user } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const today = todayKeyIST()
   const bounds = mode === 'month' ? monthBounds(today) : financialYearBounds(today)
@@ -575,7 +592,7 @@ function RangeView({ mode }) {
                 }
               />
             }
-            renderExpanded={(day) => <DayEntriesBreakdown day={day} />}
+            renderExpanded={(day) => <DayEntriesBreakdown day={day} currentUser={user} />}
           />
           {sortedDays.length > 0 && (
             <div className="card px-4 py-3 mt-3 bg-accent-soft space-y-2.5">

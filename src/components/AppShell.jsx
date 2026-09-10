@@ -37,7 +37,7 @@ function navClass({ isActive }, collapsed) {
 
 function mobileTabClass({ isActive }) {
   return [
-    'flex flex-col items-center justify-center gap-1 min-h-14 min-w-12 px-2 py-1',
+    'flex flex-col items-center justify-center gap-1 min-h-14 min-w-12 px-2 py-1.5 transition-colors',
     isActive ? 'text-accent' : 'text-ink-muted',
   ].join(' ')
 }
@@ -121,14 +121,20 @@ export default function AppShell() {
         <div className="sidebar-brand shrink-0">
           <div className={`flex items-center gap-2.5 ${collapsed ? 'justify-center' : ''}`}>
             <img
-              src={collapsed ? '/icons/icon-192.png' : '/icons/logo_full_ink_transparent.png'}
-              alt={brandPrimary}
-              className={
-                collapsed
-                  ? 'h-9 w-9 shrink-0 rounded-xl object-contain'
-                  : 'h-11 w-auto max-w-[10rem] object-contain object-left'
-              }
+              src="/icons/icon-192.png"
+              alt=""
+              className="h-9 w-9 shrink-0 rounded-xl object-contain bg-white/95 p-0.5"
             />
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-white leading-tight truncate">
+                  {brandPrimary}
+                </p>
+                <p className="text-[10px] text-[var(--color-sidebar-muted)] mt-0.5 truncate">
+                  {t('dashboard.brokerDesk')}
+                </p>
+              </div>
+            )}
           </div>
           <p className={`sidebar-panel-label ${collapsed ? 'is-hidden' : ''}`}>{panelLabel}</p>
         </div>
@@ -177,7 +183,6 @@ export default function AppShell() {
           )}
         </nav>
 
-        {/* Settings + collapse stay pinned — never clipped by nav overflow */}
         <div className="sidebar-footer shrink-0">
           <p className={`sidebar-section ${collapsed ? 'is-hidden' : ''}`}>{t('nav.account')}</p>
           <NavLink
@@ -202,7 +207,7 @@ export default function AppShell() {
       </aside>
 
       <div className="flex-1 md:min-w-0 flex flex-col min-h-svh">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 bg-surface border-b border-border px-4 py-3 md:px-8">
+        <header className="app-topbar sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-3 md:px-8">
           <div className="min-w-0 flex items-center gap-2.5">
             <img
               src="/icons/icon-192.png"
@@ -212,10 +217,10 @@ export default function AppShell() {
             <div className="min-w-0">
               <p className="text-caption text-ink-muted truncate md:hidden">{brandPrimary}</p>
               <p className="hidden md:flex items-center gap-2 text-caption text-ink-muted">
-                <Shield size={14} className="text-accent" />
-                {panelLabel}
+                <Shield size={14} className="text-accent shrink-0" />
+                <span>{panelLabel}</span>
                 <span className="text-border">/</span>
-                <span className="text-ink font-medium">{crumb}</span>
+                <span className="text-ink font-semibold">{crumb}</span>
               </p>
               <h1 className="page-title md:hidden truncate text-lg">{crumb}</h1>
             </div>
@@ -226,7 +231,7 @@ export default function AppShell() {
             <button
               type="button"
               onClick={logout}
-              className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-xl border border-border text-caption font-semibold text-ink-muted hover:text-danger hover:border-danger/40"
+              className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-xl border border-border bg-surface text-caption font-semibold text-ink-muted hover:text-danger hover:border-danger/35 transition-colors"
             >
               <LogOut size={16} strokeWidth={1.75} />
               <span className="hidden sm:inline">{t('dashboard.logout')}</span>
@@ -239,20 +244,20 @@ export default function AppShell() {
         </main>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-surface border-t border-border flex justify-around items-stretch z-10 safe-bottom">
+      <nav className="mobile-tabbar md:hidden fixed bottom-0 left-0 right-0 flex justify-around items-stretch z-10 safe-bottom">
         {mainTabs.map(({ to, label, Icon, end }) => (
           <NavLink key={to} to={to} end={end} className={mobileTabClass}>
-            <Icon size={22} strokeWidth={1.75} />
-            <span className="text-[0.7rem] leading-none font-medium">{label}</span>
+            <Icon size={20} strokeWidth={1.75} />
+            <span className="text-[0.65rem] leading-none font-semibold">{label}</span>
           </NavLink>
         ))}
         <NavLink to="/reports" className={mobileTabClass}>
-          <FileBarChart2 size={22} strokeWidth={1.75} />
-          <span className="text-[0.7rem] leading-none font-medium">{t('nav.reports')}</span>
+          <FileBarChart2 size={20} strokeWidth={1.75} />
+          <span className="text-[0.65rem] leading-none font-semibold">{t('nav.reports')}</span>
         </NavLink>
         <NavLink to="/settings" className={mobileTabClass}>
-          <Settings size={22} strokeWidth={1.75} />
-          <span className="text-[0.7rem] leading-none font-medium">{t('nav.settings')}</span>
+          <Settings size={20} strokeWidth={1.75} />
+          <span className="text-[0.65rem] leading-none font-semibold">{t('nav.settings')}</span>
         </NavLink>
       </nav>
 

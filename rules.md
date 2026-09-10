@@ -13,7 +13,7 @@ Ground rules for anyone (human or AI) writing code in this repo.
 - react-hook-form (form state — bill entry has many fields)
 - react-router-dom (client-side navigation between screens — Home/Bill/Dakhla/Rojmer/Silak/Settings)
 - lucide-react (icons)
-- SheetJS (xlsx) — Excel/CSV export, client-side
+- ExcelJS — Excel (.xlsx) export, client-side (writes only; no spreadsheet import)
 - jsPDF — PDF export, client-side
 - JSZip — year-end archive bundling, client-side
 

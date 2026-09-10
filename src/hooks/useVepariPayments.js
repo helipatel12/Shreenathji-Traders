@@ -3,7 +3,7 @@
 // (see getDakhlaClearingInfo), not bill.totalAmount.
 
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
 import { vepariPaymentCollectionRef, vepariPaymentDocRef } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
@@ -61,13 +61,14 @@ export function useVepariPayments() {
     }
   }, [refreshLocal])
 
-  async function addPayment({ billId, amount, type, date, createdBy }) {
+  async function addPayment({ billId, amount, type, date, createdBy, createdByName }) {
     const payload = {
       billId,
       amount: parseLocaleNumber(amount),
       type,
       date,
       createdBy,
+      createdByName: String(createdByName || '').trim() || null,
       editHistory: [],
     }
     const ref = doc(vepariPaymentCollectionRef())
@@ -119,41 +120,22 @@ export function useVepariPayments() {
     }
   }
 
-  async function voidPayment(localId, reason, voidedBy) {
+  async function deletePayment(localId) {
     const existing = await localDb.vepariPayments.get(localId)
-    if (!existing || existing.isVoided) return
-    const voidedAt = new Date().toISOString()
-    const historyEntry = {
-      field: 'isVoided',
-      oldValue: false,
-      newValue: true,
-      editedBy: voidedBy,
-      editedAt: voidedAt,
+    if (!existing) return
+    if (!existing.firestoreId) {
+      await localDb.vepariPayments.delete(localId)
+      await refreshLocal()
+      return
     }
-    const syncRevision = nextSyncRevision(existing)
-    const changes = {
-      isVoided: true,
-      voidReason: reason || '',
-      voidedBy,
-      voidedAt,
-      editHistory: [...(existing.editHistory || []), historyEntry],
-    }
-    await localDb.vepariPayments.update(localId, {
-      ...changes,
-      syncRevision,
-      syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
-    })
+    await localDb.vepariPayments.update(localId, { syncStatus: 'pendingDelete' })
     await refreshLocal()
-    if (existing.firestoreId) {
-      try {
-        await updateDoc(vepariPaymentDocRef(existing.firestoreId), changes)
-        await markSyncedIfUnchanged(localDb.vepariPayments, localId, syncRevision)
-        await refreshLocal()
-      } catch (err) {
-        console.error('Vepari payment void queued locally — Firestore sync failed:', err)
-      }
+    try {
+      await deleteDoc(vepariPaymentDocRef(existing.firestoreId))
+    } catch (err) {
+      console.error('Vepari payment delete queued locally — Firestore sync failed:', err)
     }
   }
 
-  return { payments, loading, addPayment, updatePayment, voidPayment }
+  return { payments, loading, addPayment, updatePayment, deletePayment, voidPayment: deletePayment }
 }

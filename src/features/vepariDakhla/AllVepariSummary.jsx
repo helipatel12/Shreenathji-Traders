@@ -16,6 +16,7 @@ import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
+import { resolveCreatedByName } from '../../utils/createdBy'
 import { printDakhla } from './dakhlaPrint'
 import { buildAllVepariDayRows, buildAllVepariDayPdfColumns } from './dakhlaExport'
 
@@ -287,6 +288,9 @@ export default function AllVepariSummary() {
                 <li key={line.bill.firestoreId || line.bill.id}>
                   {t('bills.entryNumberLabel')} {formatDigits(line.bill.entryNumber)} ·{' '}
                   {line.bill.farmerName} · {formatCurrency(line.total)}
+                  <span className="block">
+                    {t('common.createdBy')}: {resolveCreatedByName(line.bill, user)}
+                  </span>
                 </li>
               ))}
             </ul>

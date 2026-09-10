@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, History, Ban } from 'lucide-react'
+import { Plus, Pencil, History, Trash2 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useBills } from '../../hooks/useBills'
 import { useVeparis } from '../../hooks/useVeparis'
@@ -14,6 +14,7 @@ import PrintButton from '../../components/PrintButton'
 import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
+import CreatedByLine from '../../components/CreatedByLine'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printBill } from './billPrint'
@@ -24,52 +25,47 @@ import {
   buildBillListPdfColumns,
 } from './billExport'
 
-function EditHistoryList({ editHistory }) {
+function BillExpandedMeta({ bill, currentUser }) {
   const { t, lang } = useLocale()
-  if (!editHistory?.length) return null
+  const editHistory = bill.editHistory
   const locale = lang === 'gu' ? 'gu-IN' : 'en-IN'
   return (
-    <div className="mt-3 pt-3 border-t border-border">
-      <p className="text-caption text-ink-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
-        <History size={14} strokeWidth={1.75} />
-        {t('bills.editHistory')}
-      </p>
-      <ul className="space-y-1">
-        {editHistory.map((entry, i) => (
-          <li key={i} className="text-caption text-ink-muted">
-            <span className="text-ink">{entry.field}</span> —{' '}
-            {new Date(entry.editedAt).toLocaleString(locale)}
-          </li>
-        ))}
-      </ul>
+    <div className="mt-3 pt-3 border-t border-border space-y-3">
+      <CreatedByLine record={bill} currentUser={currentUser} />
+      {editHistory?.length ? (
+        <div>
+          <p className="text-caption text-ink-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
+            <History size={14} strokeWidth={1.75} />
+            {t('bills.editHistory')}
+          </p>
+          <ul className="space-y-1">
+            {editHistory.map((entry, i) => (
+              <li key={i} className="text-caption text-ink-muted">
+                <span className="text-ink">{entry.field}</span> —{' '}
+                {new Date(entry.editedAt).toLocaleString(locale)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 function VoidConfirmDialog({ onConfirm, onCancel }) {
   const { t } = useLocale()
-  const [reason, setReason] = useState('')
   return (
     <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
       <div className="card px-5 py-5 max-w-sm w-full">
-        <p className="text-body text-ink font-semibold mb-1">{t('bills.voidConfirmTitle')}</p>
-        <p className="text-caption text-ink-muted mb-4">{t('bills.voidConfirmBody')}</p>
-        <label htmlFor="bill-void-reason" className="block text-caption text-ink-muted mb-1.5">
-          {t('bills.voidReasonLabel')}
-        </label>
-        <input
-          id="bill-void-reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          className="text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 mb-4 focus:border-accent focus:ring-2 focus:ring-accent-soft"
-        />
+        <p className="text-body text-ink font-semibold mb-1">{t('bills.deleteConfirmTitle')}</p>
+        <p className="text-caption text-ink-muted mb-4">{t('bills.deleteConfirmBody')}</p>
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => onConfirm(reason)}
+            onClick={() => onConfirm()}
             className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body"
           >
-            {t('bills.confirmVoid')}
+            {t('bills.confirmDelete')}
           </button>
           <button
             type="button"
@@ -87,7 +83,7 @@ function VoidConfirmDialog({ onConfirm, onCancel }) {
 export default function BillsScreen() {
   const { user, isOwner, canWrite } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
-  const { bills, loading, addBill, updateBill, voidBill } = useBills()
+  const { bills, loading, addBill, updateBill, deleteBill } = useBills()
   const { veparis } = useVeparis()
   const { business } = useBusiness()
   const [mode, setMode] = useState('list')
@@ -168,7 +164,11 @@ export default function BillsScreen() {
   }
 
   async function handleAdd(payload) {
-    await addBill({ ...payload, createdBy: user?.email })
+    await addBill({
+      ...payload,
+      createdBy: user?.email,
+      createdByName: user?.name || user?.email || '',
+    })
     setMode('list')
   }
 
@@ -177,8 +177,8 @@ export default function BillsScreen() {
     setMode('list')
   }
 
-  async function handleConfirmVoid(reason) {
-    await voidBill(voidingBillId, reason, user?.email)
+  async function handleConfirmDelete() {
+    await deleteBill(voidingBillId)
     setVoidingBillId(null)
   }
 
@@ -319,10 +319,10 @@ export default function BillsScreen() {
             <button
               type="button"
               className="action-btn action-btn-danger"
-              aria-label={t('bills.void')}
+              aria-label={t('bills.delete')}
               onClick={() => setVoidingBillId(bill.id)}
             >
-              <Ban size={14} strokeWidth={2} />
+              <Trash2 size={14} strokeWidth={2} />
             </button>
           )}
         </div>
@@ -425,18 +425,16 @@ export default function BillsScreen() {
                   }
                 />
               }
-              renderExpanded={(bill) =>
-                bill.editHistory?.length ? (
-                  <EditHistoryList editHistory={bill.editHistory} />
-                ) : null
-              }
+              renderExpanded={(bill) => (
+                <BillExpandedMeta bill={bill} currentUser={user} />
+              )}
             />
           )}
         </>
       )}
 
       {voidingBillId != null && (
-        <VoidConfirmDialog onConfirm={handleConfirmVoid} onCancel={() => setVoidingBillId(null)} />
+        <VoidConfirmDialog onConfirm={handleConfirmDelete} onCancel={() => setVoidingBillId(null)} />
       )}
     </div>
   )

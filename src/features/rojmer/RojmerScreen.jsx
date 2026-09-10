@@ -19,6 +19,7 @@ import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
 import { getBillClearingInfo, excludeVoided } from '../../utils/calc'
 import { findVepari, vepariDisplayName } from '../../utils/vepari'
+import { resolveCreatedByName } from '../../utils/createdBy'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
 import PaymentForm from './PaymentForm'
 import ExportMenu from '../../components/ExportMenu'
@@ -27,12 +28,13 @@ import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import SearchableSelect from '../../components/SearchableSelect'
+import CreatedByLine from '../../components/CreatedByLine'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF, printRows } from '../../utils/export'
 import { printBill } from '../bills/billPrint'
 import { buildRojmerRows, buildRojmerPdfColumns } from './rojmerExport'
 
-function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoidPayment }) {
+function BillPayments({ bill, payments, canWrite, isOwner, currentUser, onEditPayment, onVoidPayment }) {
   const { t, formatCurrency, formatDate } = useLocale()
   const billPayments = payments.filter((p) => p.billId === bill.firestoreId)
   if (billPayments.length === 0) {
@@ -50,6 +52,7 @@ function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoid
           <span className={`text-ink ${payment.isVoided ? 'line-through' : ''}`}>
             {formatCurrency(payment.amount)} · {t(`rojmer.${payment.type}`)} ·{' '}
             {formatDate(payment.date)}
+            {` · ${t('common.createdBy')} ${resolveCreatedByName(payment, currentUser)}`}
             {payment.isVoided ? ` · ${t('common.voided')}` : ''}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
@@ -74,7 +77,7 @@ function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoid
                 <button
                   type="button"
                   onClick={() => onVoidPayment(payment)}
-                  aria-label={t('rojmer.void')}
+                  aria-label={t('rojmer.delete')}
                   className="min-h-12 min-w-12 inline-flex items-center justify-center text-ink-muted hover:text-danger"
                 >
                   <Ban size={14} strokeWidth={1.75} />
@@ -90,28 +93,18 @@ function BillPayments({ bill, payments, canWrite, isOwner, onEditPayment, onVoid
 
 function VoidConfirmDialog({ onConfirm, onCancel }) {
   const { t } = useLocale()
-  const [reason, setReason] = useState('')
   return (
     <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
       <div className="card px-5 py-5 max-w-sm w-full">
-        <p className="text-body text-ink font-semibold mb-1">{t('rojmer.voidConfirmTitle')}</p>
-        <p className="text-caption text-ink-muted mb-4">{t('rojmer.voidConfirmBody')}</p>
-        <label htmlFor="void-reason" className="block text-caption text-ink-muted mb-1.5">
-          {t('rojmer.voidReasonLabel')}
-        </label>
-        <input
-          id="void-reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          className="text-body text-ink bg-surface border border-border rounded-xl w-full py-2.5 px-3 outline-none min-h-12 mb-4 focus:border-accent focus:ring-2 focus:ring-accent-soft"
-        />
+        <p className="text-body text-ink font-semibold mb-1">{t('rojmer.deleteConfirmTitle')}</p>
+        <p className="text-caption text-ink-muted mb-4">{t('rojmer.deleteConfirmBody')}</p>
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => onConfirm(reason)}
+            onClick={() => onConfirm()}
             className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body"
           >
-            {t('rojmer.confirmVoid')}
+            {t('rojmer.confirmDelete')}
           </button>
           <button
             type="button"
@@ -130,7 +123,7 @@ export default function RojmerScreen() {
   const { user, canWrite, isOwner } = useAuth()
   const { t, formatCurrency, formatDigits, formatDate } = useLocale()
   const { bills, loading: billsLoading } = useBills()
-  const { payments, loading: paymentsLoading, addPayment, updatePayment, voidPayment } = usePayments()
+  const { payments, loading: paymentsLoading, addPayment, updatePayment, deletePayment } = usePayments()
   const { veparis } = useVeparis()
   const { business } = useBusiness()
 
@@ -208,7 +201,12 @@ export default function RojmerScreen() {
   }
 
   async function handleAddPayment(billLocalId, billFirestoreId, maxAmount, values) {
-    await addPayment({ billId: billFirestoreId, ...values, createdBy: user?.email })
+    await addPayment({
+      billId: billFirestoreId,
+      ...values,
+      createdBy: user?.email,
+      createdByName: user?.name || user?.email || '',
+    })
     setAddingPayment(false)
     setManualBillId('')
   }
@@ -240,8 +238,8 @@ export default function RojmerScreen() {
     setEditingPayment(null)
   }
 
-  async function handleConfirmVoid(reason) {
-    await voidPayment(voidingPayment.id, reason, user?.email)
+  async function handleConfirmVoid() {
+    await deletePayment(voidingPayment.id)
     setVoidingPayment(null)
   }
 
@@ -504,6 +502,7 @@ export default function RojmerScreen() {
           }
           renderExpanded={(row) => (
             <div className="space-y-4">
+              <CreatedByLine record={row.bill} currentUser={user} />
               {row.isCleared && (
                 <p className="text-caption text-success">
                   {t('rojmer.clearedBadge')} · {formatDate(row.clearingDate)}
@@ -514,6 +513,7 @@ export default function RojmerScreen() {
                 payments={payments}
                 canWrite={canWrite}
                 isOwner={isOwner}
+                currentUser={user}
                 onEditPayment={(payment) =>
                   setEditingPayment({ billLocalId: row.bill.id, payment })
                 }

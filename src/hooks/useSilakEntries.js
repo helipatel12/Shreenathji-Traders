@@ -53,7 +53,7 @@ export function useSilakEntries() {
     }
   }, [refreshLocal])
 
-  async function addEntry({ date, side, label, amount, createdBy }) {
+  async function addEntry({ date, side, label, amount, createdBy, createdByName }) {
     const payload = {
       date,
       side,
@@ -61,6 +61,7 @@ export function useSilakEntries() {
       amount: Number(amount),
       isManual: true,
       createdBy,
+      createdByName: String(createdByName || '').trim() || null,
     }
     const ref = doc(silakEntryCollectionRef())
     const localId = await localDb.silakEntries.add({

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
 import { allocateEntryNumberRemote, allocateDakhlaNumberRemote, billCollectionRef, billDocRef, paymentDocRef, vepariPaymentDocRef } from '../firebase/firestore'
 import { useAuth } from './useAuth'
@@ -279,6 +279,7 @@ export function useBills() {
     date,
     items,
     createdBy,
+    createdByName,
     locationId,
     entryNumber: requestedEntry,
     dakhlaNumber: requestedDakhla,
@@ -306,6 +307,7 @@ export function useBills() {
         items,
         totalAmount: computeBillTotal(items),
         createdBy,
+        createdByName: String(createdByName || '').trim() || null,
         locationId: locationId || null,
         entryNumber,
         dakhlaNumber,
@@ -446,69 +448,30 @@ export function useBills() {
     }
   }
 
-  async function voidBill(localId, reason, voidedBy) {
+  async function deleteBill(localId) {
     const existing = await localDb.bills.get(localId)
-    if (!existing || existing.isVoided) return
+    if (!existing) return
 
-    const voidedAt = new Date().toISOString()
-    const historyEntry = {
-      field: 'isVoided',
-      oldValue: false,
-      newValue: true,
-      editedBy: voidedBy,
-      editedAt: voidedAt,
-    }
-    const syncRevision = nextSyncRevision(existing)
-    const changes = {
-      isVoided: true,
-      voidReason: reason || '',
-      voidedBy,
-      voidedAt,
-      editHistory: [...(existing.editHistory || []), historyEntry],
+    async function hardDeletePaymentRow(table, payment, docRefFn, label) {
+      if (!payment.firestoreId) {
+        await table.delete(payment.id)
+        return
+      }
+      await table.update(payment.id, { syncStatus: 'pendingDelete' })
+      try {
+        await deleteDoc(docRefFn(payment.firestoreId))
+      } catch (err) {
+        console.error(`${label} delete (cascade from bill) queued locally:`, err)
+      }
     }
 
-    await localDb.bills.update(localId, {
-      ...changes,
-      syncRevision,
-      syncStatus: existing.firestoreId ? 'pending' : existing.syncStatus,
-    })
-
-    // Cascade: payments on this bill must leave silak/rojmer/dashboard too.
     if (existing.firestoreId) {
       const related = await localDb.payments
         .where('billId')
         .equals(existing.firestoreId)
         .toArray()
       for (const payment of related) {
-        if (payment.isVoided) continue
-        const payRev = nextSyncRevision(payment)
-        const payHistory = {
-          field: 'isVoided',
-          oldValue: false,
-          newValue: true,
-          editedBy: voidedBy,
-          editedAt: voidedAt,
-        }
-        const payChanges = {
-          isVoided: true,
-          voidReason: reason || 'Bill voided',
-          voidedBy,
-          voidedAt,
-          editHistory: [...(payment.editHistory || []), payHistory],
-        }
-        await localDb.payments.update(payment.id, {
-          ...payChanges,
-          syncRevision: payRev,
-          syncStatus: payment.firestoreId ? 'pending' : payment.syncStatus,
-        })
-        if (payment.firestoreId) {
-          try {
-            await updateDoc(paymentDocRef(payment.firestoreId), payChanges)
-            await markSyncedIfUnchanged(localDb.payments, payment.id, payRev)
-          } catch (err) {
-            console.error('Payment void (cascade from bill) queued locally:', err)
-          }
-        }
+        await hardDeletePaymentRow(localDb.payments, payment, paymentDocRef, 'Payment')
       }
       notifyLocalDataChanged('payments')
 
@@ -517,51 +480,30 @@ export function useBills() {
         .equals(existing.firestoreId)
         .toArray()
       for (const payment of relatedVepari) {
-        if (payment.isVoided) continue
-        const payRev = nextSyncRevision(payment)
-        const payHistory = {
-          field: 'isVoided',
-          oldValue: false,
-          newValue: true,
-          editedBy: voidedBy,
-          editedAt: voidedAt,
-        }
-        const payChanges = {
-          isVoided: true,
-          voidReason: reason || 'Bill voided',
-          voidedBy,
-          voidedAt,
-          editHistory: [...(payment.editHistory || []), payHistory],
-        }
-        await localDb.vepariPayments.update(payment.id, {
-          ...payChanges,
-          syncRevision: payRev,
-          syncStatus: payment.firestoreId ? 'pending' : payment.syncStatus,
-        })
-        if (payment.firestoreId) {
-          try {
-            await updateDoc(vepariPaymentDocRef(payment.firestoreId), payChanges)
-            await markSyncedIfUnchanged(localDb.vepariPayments, payment.id, payRev)
-          } catch (err) {
-            console.error('Vepari payment void (cascade from bill) queued locally:', err)
-          }
-        }
+        await hardDeletePaymentRow(
+          localDb.vepariPayments,
+          payment,
+          vepariPaymentDocRef,
+          'Vepari payment',
+        )
       }
       notifyLocalDataChanged('vepariPayments')
     }
 
-    await refreshLocal()
+    if (!existing.firestoreId) {
+      await localDb.bills.delete(localId)
+      await refreshLocal()
+      return
+    }
 
-    if (existing.firestoreId) {
-      try {
-        await updateDoc(billDocRef(existing.firestoreId), changes)
-        await markSyncedIfUnchanged(localDb.bills, localId, syncRevision)
-        await refreshLocal()
-      } catch (err) {
-        console.error('Bill void queued locally — Firestore sync failed:', err)
-      }
+    await localDb.bills.update(localId, { syncStatus: 'pendingDelete' })
+    await refreshLocal()
+    try {
+      await deleteDoc(billDocRef(existing.firestoreId))
+    } catch (err) {
+      console.error('Bill delete queued locally — Firestore sync failed:', err)
     }
   }
 
-  return { bills, loading, addBill, updateBill, voidBill }
+  return { bills, loading, addBill, updateBill, deleteBill, voidBill: deleteBill }
 }

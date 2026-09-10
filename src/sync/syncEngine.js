@@ -84,9 +84,9 @@ export async function flushPendingWrites() {
   try {
     do {
       flushAgain = false
-      await flushTable(localDb.bills, billDocRef)
-      await flushTable(localDb.payments, paymentDocRef)
-      await flushTable(localDb.vepariPayments, vepariPaymentDocRef)
+      await flushTable(localDb.bills, billDocRef, { allowDelete: true })
+      await flushTable(localDb.payments, paymentDocRef, { allowDelete: true })
+      await flushTable(localDb.vepariPayments, vepariPaymentDocRef, { allowDelete: true })
       await flushTable(localDb.veparis, vepariDocRef, { allowDelete: true })
       await flushTable(localDb.silakEntries, silakEntryDocRef, { allowDelete: true })
     } while (flushAgain)

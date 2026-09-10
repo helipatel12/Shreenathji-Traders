@@ -16,7 +16,13 @@ import UserManagementScreen from './features/admin/UserManagementScreen'
 import QueueMonitorScreen from './features/admin/QueueMonitorScreen'
 import ReportsScreen from './features/reports/ReportsScreen'
 import { SkeletonPage } from './components/Skeleton'
-import { resendEmailVerification, getAuthActionFromUrl, clearAuthActionFromUrl, applyEmailVerificationCode } from './firebase/auth'
+import {
+  resendEmailVerification,
+  getAuthActionFromUrl,
+  clearAuthActionFromUrl,
+  applyEmailVerificationCode,
+  authErrorLocaleKey,
+} from './firebase/auth'
 
 function UnauthorizedScreen({ reason = 'unauthorized' }) {
   const { logout, authReason, confirmEmailVerified } = useAuth()
@@ -36,7 +42,32 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
   useEffect(() => {
     if (reason !== 'unverified') return
     const action = getAuthActionFromUrl()
-    if (!action?.oobCode || action.mode !== 'verifyEmail') return
+    if (!action || action.mode !== 'verifyEmail') return
+
+    // Hosted Firebase page already verified; just refresh Auth membership.
+    if (!action.oobCode) {
+      let cancelled = false
+      ;(async () => {
+        setBusy(true)
+        try {
+          clearAuthActionFromUrl()
+          const result = await confirmEmailVerified()
+          if (cancelled) return
+          if (!result?.ok && result?.reason === 'still-unverified') {
+            setInfo(t('auth.stillUnverified'))
+          }
+        } catch (err) {
+          if (cancelled) return
+          setInfo(t(authErrorLocaleKey(err)))
+        } finally {
+          if (!cancelled) setBusy(false)
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
+
     let cancelled = false
     ;(async () => {
       setBusy(true)
@@ -51,7 +82,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       } catch (err) {
         if (cancelled) return
         console.error('Verify link on unauthorized screen failed:', err)
-        setInfo(err?.message || t('auth.errorBody'))
+        setInfo(t(authErrorLocaleKey(err)))
         clearAuthActionFromUrl()
       } finally {
         if (!cancelled) setBusy(false)
@@ -71,7 +102,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       setInfo(t('auth.verificationResent'))
     } catch (err) {
       console.error('Resend verification failed:', err)
-      setInfo(err?.message || t('auth.errorBody'))
+      setInfo(t(authErrorLocaleKey(err)))
     } finally {
       setBusy(false)
     }
@@ -105,8 +136,8 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       <div className="absolute top-4 right-4">
         <LanguageToggle />
       </div>
-      <div className="w-full max-w-sm card px-6 py-8 text-center">
-        <p className="text-caption text-danger font-semibold uppercase tracking-wide mb-2">
+        <div className="w-full max-w-sm card px-6 py-8 text-center shadow-[var(--shadow-raised)]">
+        <p className="section-label text-danger mb-2">
           {title}
         </p>
         <p className="text-body text-ink">{body}</p>
@@ -117,7 +148,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
               type="button"
               disabled={busy}
               onClick={handleVerified}
-              className="w-full mt-4 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors disabled:opacity-40"
+              className="btn-primary w-full mt-4 disabled:opacity-40"
             >
               {busy ? t('auth.checkingVerification') : t('auth.iVerified')}
             </button>
@@ -125,7 +156,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
               type="button"
               disabled={busy}
               onClick={handleResend}
-              className="w-full mt-3 min-h-12 rounded-xl border border-border bg-surface hover:bg-surface-muted text-ink font-semibold text-body py-3 transition-colors disabled:opacity-40"
+              className="btn-secondary w-full mt-3 disabled:opacity-40"
             >
               {t('auth.resendVerification')}
             </button>
@@ -134,7 +165,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
         <button
           type="button"
           onClick={logout}
-          className="w-full mt-3 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-surface font-semibold text-body py-3 transition-colors"
+          className="btn-primary w-full mt-3"
         >
           {t('auth.tryDifferentAccount')}
         </button>

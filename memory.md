@@ -14,10 +14,10 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 
 **Owner rule (2026-09-04): NEVER deploy without explicit permission.** No `firebase deploy`, hosting, rules, or production publish unless the owner asks in that message. Local build/dev/lint/preview is fine.
 
-**Phase**: Phase 10 (CA reports) complete; Phases 0–10 code-complete. Phase 11 remains owner trial / offline hardening (needs real devices). Build clean locally. **Not deployed** (owner forbids agent deploys).
+**Phase**: Phases 0–10 code-complete. **Phase 11** = owner multi-device offline trial (checklist in `phases.md`). Live: https://shreenath-traders.web.app. **Never deploy without explicit owner ask.**
 
-**Currently working on**: — ready for owner local test (`npm run dev`)
-**Blocked on**: owner must validate Jansa Silak જમા/ઉધાર against paper ledger; Phase 11 offline multi-device trial.
+**Currently working on**: — Phase 11 owner checklist ready; docs aligned to ExcelJS
+**Blocked on**: owner Phase 11 device trial; Jansa Silak જમા/ઉધાર vs paper; whether vepariPayments should feed silak
 
 **Owner domain map (2026-09-08):**
 - **Bills** = buy goods from khedut/farmer
@@ -99,6 +99,7 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 - 2026-09-05 — **Cleared stale Known issues after code audit**: (1) staff/CA provisioning exists (Phase 8 + admin screens); (2) bundle no longer blocks at 2MB — main ~1.27MB with export libs code-split; (3) PDF Gujarati font / payment void / rojmer payment-row export are shipped; (4) voided bills intentionally hidden from Bills list (not struck-through); (5) print templates are portrait full-page matching paper refs; (6) `useDashboardSummary` now reuses `useBills`/`usePayments`/`useSilakEntries` (removed duplicate onSnapshot path); (7) `npm audit fix` cleared all advisories except the known accepted `xlsx` write-only risk.
 - 2026-09-05 — Right-rail **ProfileCorner** (desktop xl+): avatar, today snapshot cards, reminders; language/settings/logout moved there on wide screens.
 - 2026-09-05 — **Phase 10 (CA / reporting) built** — was the only incomplete phase in `phases.md`. `useCaReport.js` + `ReportsScreen.jsx` + `caReportExport.js`: FY/date-range summary (bills, goods total, commission earned, outstanding rojmer), tabs for bill list / vepari totals / outstanding, tab export + multi-sheet Full Excel. Nav `/reports` + Settings link (CA-friendly). Fixed `phases.md` title typo (`ch#` → `#`). Documented that sync lives in feature hooks (`syncEngine.js` is the architecture placeholder, not a second path). **Phase 11** still needs owner offline/multi-device trial — not something to fake in code.
+- 2026-09-08 — Docs drift fixed: SheetJS → **ExcelJS** in `README.md`, `rules.md`, `architecture.md`; folder map adds `vepariPay` / `reports` / `admin`. Phase 11 expanded with owner multi-device offline checklist in `phases.md`.
 
 ## Decisions log
 
@@ -110,20 +111,21 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 - 2026-07-21 — Used **Tailwind CSS v4** (installed today), which is CSS-first: theme tokens live in `src/styles/tokens.css` via an `@theme` block instead of a separate `tailwind.config.js`. This satisfies architecture.md/phases.md's "wired into tokens.css + Tailwind config" requirement — the two are now the same file — but is worth noting since it's a different mechanism than a classic `tailwind.config.js`-based v3 setup.
 - 2026-07-21 — Firestore created as **Standard edition** (not Enterprise) — matches this app's document-based data model (architecture.md §4) and stays comfortably inside Spark plan quotas (architecture.md §6). Enterprise edition targets MongoDB-compatible/heavier query workloads this app doesn't need.
 - 2026-07-21 — Firebase Analytics (`measurementId`) intentionally **not** added — not part of the tech stack in architecture.md §1, and owner confirmed leaving it out.
-- 2026-07-21 — `xlsx` (SheetJS) kept at its current npm version despite a known high-severity advisory (prototype pollution / ReDoS) — both issues trigger on parsing untrusted files, and this app only ever writes xlsx (export), never imports one, throughout prd.md's v1 scope. Revisit if a future spreadsheet-import feature is ever added (currently out of scope per prd.md §6).
+- 2026-07-21 — `xlsx` (SheetJS) kept despite advisory (write-only use). **Superseded 2026-09-08** — see ExcelJS decision below.
+- 2026-09-08 — **Excel export uses ExcelJS** (`exceljs` in `package.json`; `src/utils/export.js`, `caReportExport.js`). Docs (`README.md`, `rules.md`, `architecture.md`) updated off SheetJS. No spreadsheet import in v1 — write-only `.xlsx` remains.
 
 ## Known issues / open questions
 
 Only items that still need the **owner** (code-side issues from the old list were audited and cleared 2026-09-05).
 
+- **Phase 11** — multi-device offline not proven until owner runs the checklist in `phases.md` Phase 11.
 - **Jansa Silak જમા/ઉધાર vs paper ledger** — still needs owner validation against paper. Current auto formula uses fees + khedut pending + cheques (jama) and dakhla totals (udhar); vepari collections exist now but are **not** wired into silak until owner says so.
-- 2026-09-08 — **Vepari settlement built** (`/vepari-pay`): Rojmer twin against dakhla totals; collection `vepariPayments`; needs `firestore:rules` deploy before cloud writes work. Day-group per vepari. Separate **દાખલા નં.** (`dakhlaNumber`) parallel to farmer નોંધ નં.
+- 2026-09-08 — **Vepari settlement** (`/vepari-pay`) + **દાખલા નં.** live in code; hosting + rules deployed (owner ask).
 - **Owner smoke tests when convenient** (features are built; these prove them on real data/devices):
   1. Offline bill add/edit → reconnect → reload (Phase 4).
   2. Dakhla line math vs hand calc for one vepari (Phase 5).
-  3. Two offline devices each recording a payment on the same bill, then sync (Phase 6).
+  3. Two offline devices each recording a payment on the same bill, then sync (Phase 6) — also in Phase 11 checklist.
   4. Invite a second email → create account on another browser → staff gates (Phase 8).
   5. Settings → Year-end backup zip for a past FY (Phase 9).
   6. Fill Business Profile, then Print one bill + one dakhla — compare to paper pads.
-- **`xlsx` npm advisory remains** — write-only export; no fix upstream; accepted (decisions log 2026-07-21).
-- 2026-09-05 — Deployed hosting + firestore.rules to https://shreenath-traders.web.app (owner request).
+- 2026-09-08 — Deployed hosting + firestore.rules again (auth email fixes, remove Google/Apple login, admin delete user).

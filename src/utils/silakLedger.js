@@ -135,6 +135,8 @@ export function buildSilakLedgerEntries({
           label: `${pendingLabel} — ${note} — ${farmer}`.trim(),
           amount: pending,
           isManual: false,
+          createdBy: bill.createdBy || null,
+          createdByName: bill.createdByName || null,
           key: `jama-pending-${bill.firestoreId || bill.id}`,
         })
       }
@@ -166,6 +168,8 @@ export function buildSilakLedgerEntries({
       label: `${chequeLabel} — ${farmer}`.trim(),
       amount: payment.amount,
       isManual: false,
+      createdBy: payment.createdBy || null,
+      createdByName: payment.createdByName || null,
       key: `jama-cheque-${payment.firestoreId || payment.id}`,
     })
   }

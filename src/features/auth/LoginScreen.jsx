@@ -7,48 +7,16 @@ import {
   sendEmailSignInLink,
   sendSmsCode,
   confirmSmsCode,
-  signInWithGoogle,
-  signInWithApple,
   verifyResetCode,
   confirmResetPassword,
   getAuthActionFromUrl,
   clearAuthActionFromUrl,
   applyEmailVerificationCode,
+  authErrorLocaleKey,
 } from '../../firebase/auth'
 import { stashPendingDisplayName } from '../../context/AuthContext'
 import { useLocale } from '../../context/LocaleContext'
 import LanguageToggle from '../../components/LanguageToggle'
-
-function GoogleIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>
-      <path
-        fill="#FFC107"
-        d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.2 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.2-.1-2.3-.4-3.5z"
-      />
-      <path
-        fill="#FF3D00"
-        d="M6.3 14.7l6.6 4.8C14.7 16 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.2 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
-      />
-      <path
-        fill="#4CAF50"
-        d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.3 26.7 36 24 36c-5.3 0-9.7-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"
-      />
-      <path
-        fill="#1976D2"
-        d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.1-3.5 5.5-6.5 6.6l6.2 5.2C38.4 37 44 32 44 24c0-1.2-.1-2.3-.4-3.5z"
-      />
-    </svg>
-  )
-}
-
-function AppleIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M16.4 12.6c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.6-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7s1.6.7 2.7.7c1.1 0 1.8-1 2.5-2 .8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.2-3.4zM14.3 6.5c.6-.7 1-1.7.9-2.7-0.9.1-1.9.6-2.5 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 1.9-.4 2.5-1.2z" />
-    </svg>
-  )
-}
 
 export default function LoginScreen() {
   const { t } = useLocale()
@@ -80,7 +48,23 @@ export default function LoginScreen() {
   // Handle inbox links: password reset + email verification.
   useEffect(() => {
     const action = getAuthActionFromUrl()
-    if (!action?.oobCode) return
+    if (!action) return
+
+    // Firebase hosted action page already applied the code, then redirected here.
+    if (action.mode === 'verifyEmail' && !action.oobCode) {
+      setMode('signin')
+      setInfoMessage(t('auth.emailVerifiedOk'))
+      clearAuthActionFromUrl()
+      return
+    }
+    if (action.mode === 'resetPassword' && !action.oobCode) {
+      setMode('signin')
+      setInfoMessage(t('auth.resetPasswordOk'))
+      clearAuthActionFromUrl()
+      return
+    }
+
+    if (!action.oobCode) return
 
     if (action.mode === 'resetPassword') {
       setMode('forgot')
@@ -115,38 +99,7 @@ export default function LoginScreen() {
   }, [])
 
   function friendlyAuthError(err) {
-    const code = err?.code || ''
-    if (code.includes('invalid-email') || code.includes('missing-email')) {
-      return t('auth.errInvalidEmail')
-    }
-    if (code.includes('email-already-in-use')) return t('auth.errEmailInUse')
-    if (code.includes('weak-password')) return t('auth.errWeakPassword')
-    if (
-      code.includes('invalid-credential') ||
-      code.includes('wrong-password') ||
-      code.includes('user-not-found')
-    ) {
-      return t('auth.errBadCredentials')
-    }
-    if (code.includes('too-many-requests')) return t('auth.errTooMany')
-    if (code.includes('network-request-failed')) return t('auth.errNetwork')
-    if (code.includes('popup-closed-by-user') || code.includes('cancelled-popup-request')) {
-      return t('auth.errPopupClosed')
-    }
-    if (code.includes('operation-not-allowed') || code.includes('admin-restricted-operation')) {
-      return t('auth.errProviderDisabled')
-    }
-    if (code.includes('billing-not-enabled') || code.includes('captcha-check-failed')) {
-      return t('auth.errSmsBilling')
-    }
-    if (code.includes('invalid-phone-number')) return t('auth.errInvalidPhone')
-    if (code.includes('invalid-verification-code') || code.includes('invalid-action-code') || code.includes('expired-action-code')) {
-      return t('auth.errInvalidResetCode')
-    }
-    if (code.includes('account-exists-with-different-credential')) {
-      return t('auth.errAccountExists')
-    }
-    return t('auth.errGeneric')
+    return t(authErrorLocaleKey(err))
   }
 
   function switchMode(next) {
@@ -299,27 +252,7 @@ export default function LoginScreen() {
     }
   }
 
-  async function handleSocial(provider) {
-    if (submitting) return
-    setSubmitting(true)
-    setErrorMessage('')
-    setInfoMessage('')
-    try {
-      if (provider === 'google') await signInWithGoogle()
-      else await signInWithApple()
-    } catch (err) {
-      console.error(`${provider} sign-in failed:`, err)
-      setErrorMessage(friendlyAuthError(err))
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const inputClass =
-    'w-full min-h-12 rounded-full border border-border/80 bg-white px-5 text-body text-ink outline-none shadow-sm focus:border-accent focus:ring-2 focus:ring-accent-soft'
-
-  const socialBtnClass =
-    'flex-1 inline-flex items-center justify-center gap-2 min-h-12 rounded-full border border-border bg-white text-body font-semibold text-ink hover:bg-surface-muted disabled:opacity-40'
+  const inputClass = 'field-input'
 
   let headline = t('auth.loginHeadline')
   let subhead = t('auth.loginSubhead')
@@ -335,21 +268,23 @@ export default function LoginScreen() {
   }
 
   return (
-    <div className="min-h-svh bg-[#f3f0e8] text-ink flex items-center justify-center p-3 sm:p-6">
+    <div className="min-h-svh bg-surface-muted text-ink flex items-center justify-center p-3 sm:p-6">
       <div className="absolute top-4 right-4 z-30">
         <LanguageToggle />
       </div>
 
-      <div className="relative w-full max-w-5xl overflow-hidden rounded-[2rem] bg-[#f7f4ec] shadow-xl border border-black/5 grid lg:grid-cols-[1.05fr_1fr] min-h-[min(640px,90svh)]">
+      <div className="relative w-full max-w-5xl overflow-hidden rounded-[1.75rem] bg-surface shadow-[var(--shadow-raised)] border border-border grid lg:grid-cols-[1.05fr_1fr] min-h-[min(640px,90svh)]">
         <div className="flex flex-col px-6 py-8 sm:px-10 sm:py-10">
-          <div className="inline-flex items-center gap-2 self-start rounded-full border border-border bg-white/80 px-3 py-1.5 mb-8">
+          <div className="inline-flex items-center gap-2 self-start rounded-full border border-border bg-surface-muted px-3 py-1.5 mb-8">
             <img src="/icons/icon-192.png" alt="" className="h-6 w-6 object-contain" />
             <span className="text-caption font-semibold text-ink truncate max-w-[10rem]">
               {t('common.businessNameEn')}
             </span>
           </div>
 
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-ink">{headline}</h1>
+          <h1 className="text-3xl sm:text-4xl font-display font-bold tracking-tight text-ink">
+            {headline}
+          </h1>
           <p className="text-body text-ink-muted mt-2 mb-6">{subhead}</p>
 
           {(mode === 'signin' || mode === 'signup') && (
@@ -443,7 +378,7 @@ export default function LoginScreen() {
                   !isValidPassword ||
                   (mode === 'signup' && !isValidName)
                 }
-                className="w-full mt-1 min-h-12 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold text-body py-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                className="w-full mt-1 min-h-12 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-body py-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
               >
                 {submitting
                   ? mode === 'signup'
@@ -453,38 +388,6 @@ export default function LoginScreen() {
                     ? t('auth.signupButton')
                     : t('auth.loginButton')}
               </button>
-
-              <div className="relative my-1">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-[#f7f4ec] px-3 text-[11px] uppercase tracking-wide text-ink-muted">
-                    {t('auth.orContinue')}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => handleSocial('google')}
-                  className={socialBtnClass}
-                >
-                  <GoogleIcon />
-                  Google
-                </button>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => handleSocial('apple')}
-                  className={socialBtnClass}
-                >
-                  <AppleIcon />
-                  Apple
-                </button>
-              </div>
 
               <div className="mt-auto pt-4 flex flex-col gap-2 text-caption text-ink-muted">
                 {mode === 'signin' && (
@@ -817,14 +720,14 @@ export default function LoginScreen() {
           )}
         </div>
 
-        <div className="relative hidden lg:block bg-accent overflow-hidden m-3 rounded-[1.5rem]">
+        <div className="relative hidden lg:block bg-accent overflow-hidden m-3 rounded-[1.35rem]">
           <div className="absolute -top-16 -right-10 h-56 w-56 rounded-full bg-white/10" />
-          <div className="absolute bottom-10 -left-12 h-72 w-72 rounded-full bg-[#c4783a]/25" />
+          <div className="absolute bottom-10 -left-12 h-72 w-72 rounded-full bg-[#c4a35a]/20" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.12),transparent_50%)]" />
 
           <div className="relative h-full p-8 flex flex-col justify-between text-white">
             <div className="flex items-start justify-between gap-3">
-              <div className="rounded-2xl bg-[#e8b84a] text-ink px-4 py-3 shadow-lg max-w-[14rem]">
+              <div className="rounded-2xl bg-[#c4a35a] text-ink px-4 py-3 shadow-lg max-w-[14rem]">
                 <p className="text-sm font-semibold leading-snug">{t('auth.panelBillCard')}</p>
                 <p className="text-[11px] opacity-80 mt-1">{t('auth.panelBillTime')}</p>
               </div>
@@ -858,7 +761,7 @@ export default function LoginScreen() {
                   <span className="h-7 w-7 rounded-full bg-accent text-white text-[10px] font-bold inline-flex items-center justify-center">
                     શ્રી
                   </span>
-                  <span className="h-7 w-7 rounded-full bg-[#c4783a] text-white text-[10px] font-bold inline-flex items-center justify-center">
+                  <span className="h-7 w-7 rounded-full bg-[#c4a35a] text-white text-[10px] font-bold inline-flex items-center justify-center">
                     ક
                   </span>
                   <span className="h-7 w-7 rounded-full bg-success text-white text-[10px] font-bold inline-flex items-center justify-center">

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Plus, X } from 'lucide-react'
+import { Plus, Trash2, X } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useUsers } from '../../hooks/useUsers'
 import { useInvites } from '../../hooks/useInvites'
@@ -10,17 +10,56 @@ import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import { SkeletonTable } from '../../components/Skeleton'
 
+function DeleteUserDialog({ userLabel, busy, error, onConfirm, onCancel }) {
+  const { t } = useLocale()
+  return (
+    <div className="fixed inset-0 bg-ink/30 flex items-center justify-center px-4 z-20">
+      <div className="card px-5 py-5 max-w-sm w-full">
+        <p className="text-body text-ink font-semibold mb-1">{t('admin.deleteUserTitle')}</p>
+        <p className="text-caption text-ink-muted mb-2">{t('admin.deleteUserBody')}</p>
+        <p className="text-body text-ink font-semibold mb-4">{userLabel}</p>
+        {error && <p className="text-caption text-danger mb-3">{error}</p>}
+        <div className="flex gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="flex-1 min-h-12 rounded-xl bg-danger text-surface font-semibold text-body disabled:opacity-40"
+          >
+            {busy ? t('common.loading') : t('admin.confirmDeleteUser')}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="min-h-12 px-5 rounded-xl border border-border text-body text-ink-muted disabled:opacity-40"
+          >
+            {t('common.cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function UserManagementScreen() {
   const { isOwner, user } = useAuth()
   const { t } = useLocale()
-  const { users, loading: usersLoading, updateUser } = useUsers()
+  const { users, loading: usersLoading, updateUser, deleteUser } = useUsers()
   const { invites, loading: invitesLoading, addInvite, revokeInvite } = useInvites()
   const [showInviteForm, setShowInviteForm] = useState(false)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [selectedId, setSelectedId] = useState(null)
+  const [deletingUser, setDeletingUser] = useState(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const pendingInvites = invites.filter((i) => i.status === 'pending')
+  const ownerCount = useMemo(
+    () => users.filter((u) => u.role === 'owner').length,
+    [users],
+  )
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -40,6 +79,39 @@ export default function UserManagementScreen() {
   async function handleInvite(values) {
     await addInvite({ ...values, invitedBy: user?.email })
     setShowInviteForm(false)
+  }
+
+  function canDeleteUser(u) {
+    if (!u) return false
+    if (u.id === user?.id) return false
+    if (u.role === 'owner' && ownerCount <= 1) return false
+    return true
+  }
+
+  function deleteBlockedReason(u) {
+    if (u.id === user?.id) return t('admin.cannotDeleteSelf')
+    if (u.role === 'owner' && ownerCount <= 1) return t('admin.cannotDeleteLastOwner')
+    return ''
+  }
+
+  async function handleConfirmDelete() {
+    if (!deletingUser || deleteBusy) return
+    if (!canDeleteUser(deletingUser)) {
+      setDeleteError(deleteBlockedReason(deletingUser))
+      return
+    }
+    setDeleteBusy(true)
+    setDeleteError('')
+    try {
+      await deleteUser(deletingUser.id)
+      setSelectedId((id) => (id === deletingUser.id ? null : id))
+      setDeletingUser(null)
+    } catch (err) {
+      console.error('Delete user failed:', err)
+      setDeleteError(t('admin.deleteUserFailed'))
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const columns = [
@@ -121,26 +193,62 @@ export default function UserManagementScreen() {
               searchPlaceholder={t('admin.searchUsers')}
             />
           }
-          renderExpanded={(u) => (
-            <div className="flex flex-wrap gap-3 items-end">
-              <div>
-                <label className="block text-caption text-ink-muted mb-1">{t('admin.role')}</label>
-                <select
-                  value={u.role}
-                  disabled={u.id === user?.id}
-                  onChange={(e) => updateUser(u.id, { role: e.target.value })}
-                  className="min-h-11 rounded-xl border border-border px-3 bg-surface"
-                >
-                  <option value="owner">{t('roles.owner')}</option>
-                  <option value="staff">{t('roles.staff')}</option>
-                  <option value="ca">{t('roles.ca')}</option>
-                </select>
+          renderExpanded={(u) => {
+            const blocked = deleteBlockedReason(u)
+            return (
+              <div className="flex flex-wrap gap-3 items-end justify-between">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div>
+                    <label className="block text-caption text-ink-muted mb-1">{t('admin.role')}</label>
+                    <select
+                      value={u.role}
+                      disabled={u.id === user?.id}
+                      onChange={(e) => updateUser(u.id, { role: e.target.value })}
+                      className="min-h-11 rounded-xl border border-border px-3 bg-surface"
+                    >
+                      <option value="owner">{t('roles.owner')}</option>
+                      <option value="staff">{t('roles.staff')}</option>
+                      <option value="ca">{t('roles.ca')}</option>
+                    </select>
+                  </div>
+                  <p className="text-caption text-ink-muted pb-2">
+                    {u.id === user?.id ? t('admin.cannotChangeSelf') : t('admin.clickToChangeRole')}
+                  </p>
+                </div>
+                <div className="flex flex-col items-stretch gap-1">
+                  <button
+                    type="button"
+                    disabled={!canDeleteUser(u)}
+                    onClick={() => {
+                      setDeleteError('')
+                      setDeletingUser(u)
+                    }}
+                    className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl border border-danger/30 text-danger hover:bg-danger/5 font-semibold text-body disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    <Trash2 size={16} />
+                    {t('admin.deleteUser')}
+                  </button>
+                  {blocked && (
+                    <p className="text-caption text-ink-muted max-w-[16rem]">{blocked}</p>
+                  )}
+                </div>
               </div>
-              <p className="text-caption text-ink-muted pb-2">
-                {u.id === user?.id ? t('admin.cannotChangeSelf') : t('admin.clickToChangeRole')}
-              </p>
-            </div>
-          )}
+            )
+          }}
+        />
+      )}
+
+      {deletingUser && (
+        <DeleteUserDialog
+          userLabel={deletingUser.name || deletingUser.email || deletingUser.id}
+          busy={deleteBusy}
+          error={deleteError}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => {
+            if (deleteBusy) return
+            setDeletingUser(null)
+            setDeleteError('')
+          }}
         />
       )}
 

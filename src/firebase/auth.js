@@ -1,6 +1,5 @@
-// Auth helpers — email/password, password reset, email link, phone OTP,
-// Google, and Apple. Phone/SMS needs Firebase Phone Auth (Blaze billing);
-// Google/Apple need those providers enabled in the Firebase console.
+// Auth helpers — email/password, password reset, email link, and phone OTP.
+// Phone/SMS needs Firebase Phone Auth (Blaze billing).
 
 import {
   createUserWithEmailAndPassword,
@@ -15,9 +14,6 @@ import {
   verifyPasswordResetCode,
   confirmPasswordReset,
   applyActionCode,
-  GoogleAuthProvider,
-  OAuthProvider,
-  signInWithPopup,
   RecaptchaVerifier,
   signInWithPhoneNumber,
 } from 'firebase/auth'
@@ -25,11 +21,66 @@ import { auth } from './config'
 
 const EMAIL_LINK_KEY = 'st_email_for_sign_in'
 
+/**
+ * Continue URL for Firebase email actions. Always use the app origin root
+ * (not the current deep path) so Authorized Domains checks stay reliable.
+ * Prefer localhost over 127.0.0.1 — only "localhost" is whitelisted by default.
+ */
 function appContinueUrl(extraQuery = '') {
-  const path = typeof window !== 'undefined' ? window.location.pathname || '/' : '/'
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  const q = extraQuery ? (extraQuery.startsWith('?') ? extraQuery : `?${extraQuery}`) : ''
-  return `${origin}${path}${q}`
+  const q = String(extraQuery || '').replace(/^\?/, '')
+  return q ? `${origin}/?${q}` : `${origin}/`
+}
+
+/** Shared ActionCodeSettings for verification / reset (web handler first). */
+function emailActionSettings(mode) {
+  return {
+    url: appContinueUrl(mode ? `mode=${mode}` : ''),
+    // false = Firebase hosted page applies the code, then returns here.
+    // true is for mobile Universal Links and often breaks plain web apps.
+    handleCodeInApp: false,
+  }
+}
+
+/** Map Firebase Auth error codes → i18n keys under `auth.*`. */
+export function authErrorLocaleKey(err) {
+  const code = String(err?.code || '')
+  if (code.includes('invalid-email') || code.includes('missing-email')) {
+    return 'auth.errInvalidEmail'
+  }
+  if (code.includes('email-already-in-use')) return 'auth.errEmailInUse'
+  if (code.includes('weak-password')) return 'auth.errWeakPassword'
+  if (
+    code.includes('invalid-credential') ||
+    code.includes('wrong-password') ||
+    code.includes('user-not-found')
+  ) {
+    return 'auth.errBadCredentials'
+  }
+  if (code.includes('too-many-requests')) return 'auth.errTooMany'
+  if (code.includes('network-request-failed')) return 'auth.errNetwork'
+  if (code.includes('unauthorized-continue-uri') || code.includes('invalid-continue-uri')) {
+    return 'auth.errContinueUri'
+  }
+  if (code.includes('unauthorized-domain')) return 'auth.errUnauthorizedDomain'
+  if (code.includes('operation-not-allowed') || code.includes('admin-restricted-operation')) {
+    return 'auth.errProviderDisabled'
+  }
+  if (code.includes('billing-not-enabled') || code.includes('captcha-check-failed')) {
+    return 'auth.errSmsBilling'
+  }
+  if (code.includes('invalid-phone-number')) return 'auth.errInvalidPhone'
+  if (
+    code.includes('invalid-verification-code') ||
+    code.includes('invalid-action-code') ||
+    code.includes('expired-action-code')
+  ) {
+    return 'auth.errInvalidResetCode'
+  }
+  if (code.includes('account-exists-with-different-credential')) {
+    return 'auth.errAccountExists'
+  }
+  return 'auth.errGeneric'
 }
 
 export async function signUp(email, password) {
@@ -38,14 +89,8 @@ export async function signUp(email, password) {
     String(email || '').trim(),
     password,
   )
-  try {
-    await sendEmailVerification(credential.user, {
-      url: appContinueUrl('mode=verifyEmail'),
-      handleCodeInApp: true,
-    })
-  } catch (err) {
-    console.error('Failed to send verification email:', err)
-  }
+  // Do not swallow — callers need to show why the inbox stayed empty.
+  await sendEmailVerification(credential.user, emailActionSettings('verifyEmail'))
   return credential.user
 }
 
@@ -53,10 +98,7 @@ export async function resendEmailVerification() {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
   if (user.emailVerified) return
-  await sendEmailVerification(user, {
-    url: appContinueUrl('mode=verifyEmail'),
-    handleCodeInApp: true,
-  })
+  await sendEmailVerification(user, emailActionSettings('verifyEmail'))
 }
 
 export async function signIn(email, password) {
@@ -80,11 +122,7 @@ export async function changeAuthEmail(newEmail) {
 
 export async function sendPasswordReset(email) {
   const trimmed = String(email || '').trim()
-  const actionCodeSettings = {
-    url: appContinueUrl('mode=resetPassword'),
-    handleCodeInApp: true,
-  }
-  await sendPasswordResetEmail(auth, trimmed, actionCodeSettings)
+  await sendPasswordResetEmail(auth, trimmed, emailActionSettings('resetPassword'))
 }
 
 /** Returns the account email for a valid password-reset oobCode. */
@@ -134,6 +172,7 @@ export function clearAuthActionFromUrl() {
 
 export async function sendEmailSignInLink(email) {
   const trimmed = email.trim()
+  // Email-link sign-in requires handleCodeInApp: true.
   const actionCodeSettings = {
     url: appContinueUrl(),
     handleCodeInApp: true,
@@ -183,21 +222,6 @@ export async function completeEmailLinkSignIn(emailFromUser) {
 
 export function isEmailLinkSignIn() {
   return typeof window !== 'undefined' && isSignInWithEmailLink(auth, window.location.href)
-}
-
-export async function signInWithGoogle() {
-  const provider = new GoogleAuthProvider()
-  provider.setCustomParameters({ prompt: 'select_account' })
-  const credential = await signInWithPopup(auth, provider)
-  return credential.user
-}
-
-export async function signInWithApple() {
-  const provider = new OAuthProvider('apple.com')
-  provider.addScope('email')
-  provider.addScope('name')
-  const credential = await signInWithPopup(auth, provider)
-  return credential.user
 }
 
 /** Invisible reCAPTCHA for phone auth — container must exist in the DOM. */

@@ -76,11 +76,30 @@ Each phase should be fully working and demoable before moving to the next. Updat
 - **Done when**: an export for a sample date range matches the totals shown in-app for the same range.
 
 ## Phase 11 — Offline hardening + polish
-- Full offline test pass: create bills, record payments, edit dakhla — all offline, then verify sync on reconnect
-- Sync conflict edge cases tested (see architecture.md §5 and rules.md §5)
-- Empty states, error states, loading states reviewed against design.md voice guidance
-- App icons, splash screen, install prompt polish
-- **Done when**: the app can be handed to the actual business for a real trial week.
+**Code for Phases 0–10 is complete.** Phase 11 is an **owner trial on real devices** — it cannot be closed from the agent alone.
+
+### Owner multi-device offline checklist
+Use two phones/browsers signed in as **owner** (or owner + staff). Prefer live app: https://shreenath-traders.web.app
+
+1. **Single-device offline (airplane mode)**  
+   - Go offline → add a bill → edit it → record a Rojmer payment and/or Vepari pay → check Admin → Queue shows pending.  
+   - Go online → wait for sync → hard refresh → same records still present with correct totals.
+2. **Two devices, different bills (same day)**  
+   - Device A offline: bill for farmer X. Device B offline: bill for farmer Y.  
+   - Both reconnect → both bills appear on both devices; નોંધ નં. / દાખલા નં. stay unique (no duplicate collisions).
+3. **Two devices, same farmer bill payments (architecture key test)**  
+   - Online: create one bill with balance > 0.  
+   - Device A offline: partial Rojmer payment. Device B offline: another partial on the **same** bill.  
+   - Both reconnect → both payments listed; balance = bill total − sum(non-voided); no payment lost.
+4. **Conflict / edit edge**  
+   - Device A offline edits farmer name on a bill. Device B offline voids a *different* bill.  
+   - Reconnect → edit history on A’s bill; voided bill stays voided on both; Admin → Queue empty.
+5. **Polish spot-check**  
+   - Empty / error / loading states feel clear in Gujarati.  
+   - PWA install on one phone; export one Excel + one PDF from Bills and Reports.
+
+- Sync conflict rules: architecture.md §5 and rules.md §5  
+- **Done when**: checklist above passes on real hardware, and the business can run a trial week without paper fallback for those flows.
 
 ---
 

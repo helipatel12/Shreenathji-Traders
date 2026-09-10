@@ -1,4 +1,4 @@
-// Personal profile — name, gender, birthday, email.
+// Personal profile — name, gender, birthday, location, email.
 
 import { useEffect, useId, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
@@ -11,6 +11,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
   const [name, setName] = useState('')
   const [gender, setGender] = useState('')
   const [birthday, setBirthday] = useState('')
+  const [location, setLocation] = useState('')
   const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -21,6 +22,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
     setName(user.name || '')
     setGender(user.gender || '')
     setBirthday(user.birthday || '')
+    setLocation(user.location || '')
     setEmail(user.email || '')
   }, [user])
 
@@ -30,7 +32,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
     setSaved(false)
     setError('')
     try {
-      await updateOwnProfile({ name, gender, birthday, email })
+      await updateOwnProfile({ name, gender, birthday, location, email })
       setSaved(true)
       onSaved?.()
     } catch (err) {
@@ -63,7 +65,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor={`${uid}-name`} className="block text-caption text-ink-muted mb-1.5">
+          <label htmlFor={`${uid}-name`} className="field-label">
             {t('settings.profileName')}
           </label>
           <input
@@ -71,19 +73,19 @@ export default function ProfileSection({ embedded = false, onSaved }) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full min-h-11 rounded-full border border-border bg-surface px-4 text-body text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
+            className="field-input"
           />
         </div>
 
         <div>
-          <label htmlFor={`${uid}-gender`} className="block text-caption text-ink-muted mb-1.5">
+          <label htmlFor={`${uid}-gender`} className="field-label">
             {t('settings.profileGender')}
           </label>
           <select
             id={`${uid}-gender`}
             value={gender}
             onChange={(e) => setGender(e.target.value)}
-            className="w-full min-h-11 rounded-full border border-border bg-surface px-4 text-body text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
+            className="field-input"
           >
             <option value="">{t('settings.profileGenderUnset')}</option>
             <option value="male">{t('settings.profileGenderMale')}</option>
@@ -93,7 +95,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
         </div>
 
         <div>
-          <label htmlFor={`${uid}-birthday`} className="block text-caption text-ink-muted mb-1.5">
+          <label htmlFor={`${uid}-birthday`} className="field-label">
             {t('settings.profileBirthday')}
           </label>
           <input
@@ -101,12 +103,26 @@ export default function ProfileSection({ embedded = false, onSaved }) {
             type="date"
             value={birthday}
             onChange={(e) => setBirthday(e.target.value)}
-            className="w-full min-h-11 rounded-full border border-border bg-surface px-4 text-body text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
+            className="field-input"
           />
         </div>
 
         <div>
-          <label htmlFor={`${uid}-email`} className="block text-caption text-ink-muted mb-1.5">
+          <label htmlFor={`${uid}-location`} className="field-label">
+            {t('settings.profileLocation')}
+          </label>
+          <input
+            id={`${uid}-location`}
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder={t('settings.profileLocationPlaceholder')}
+            className="field-input"
+          />
+        </div>
+
+        <div>
+          <label htmlFor={`${uid}-email`} className="field-label">
             {t('settings.profileEmail')}
           </label>
           <input
@@ -114,7 +130,7 @@ export default function ProfileSection({ embedded = false, onSaved }) {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full min-h-11 rounded-full border border-border bg-surface px-4 text-body text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
+            className="field-input"
           />
           <p className="text-[11px] text-ink-muted mt-1.5">{t('settings.profileEmailNote')}</p>
         </div>

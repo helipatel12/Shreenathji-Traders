@@ -1,13 +1,10 @@
-// Full team list (Phase 8, Settings → Users) — owner-only read, live
-// Firestore, no offline queueing (same reasoning as useBusiness.js).
-// Editing an existing user's role/location/name IS supported (the
-// owner correcting a typo or reassigning someone), but there's no
-// delete — removing a person's access is done by demoting their role
-// or, if truly needed, from the Firebase console directly; this app
-// doesn't build its own "revoke access" flow in Phase 8's scope.
+// Full team list (Phase 8, Settings → Users / Admin → Users) — owner-only
+// read, live Firestore, no offline queueing (same reasoning as useBusiness.js).
+// Owner can update role/location/name and delete a member's business access
+// (Firestore user doc). Firebase Auth accounts are not deleted from the client.
 
 import { useEffect, useState } from 'react'
-import { onSnapshot, updateDoc } from 'firebase/firestore'
+import { onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore'
 import { userCollectionRef, userRef } from '../firebase/firestore'
 
 export function useUsers() {
@@ -26,5 +23,9 @@ export function useUsers() {
     await updateDoc(userRef(uid), changes)
   }
 
-  return { users, loading, updateUser }
+  async function deleteUser(uid) {
+    await deleteDoc(userRef(uid))
+  }
+
+  return { users, loading, updateUser, deleteUser }
 }

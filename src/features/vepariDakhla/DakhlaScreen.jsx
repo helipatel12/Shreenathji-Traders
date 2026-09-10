@@ -22,6 +22,7 @@ import ReadOnlyBanner from '../../components/ReadOnlyBanner'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import VepariSelect from '../../components/VepariSelect'
+import CreatedByLine from '../../components/CreatedByLine'
 import { SkeletonTable } from '../../components/Skeleton'
 import { exportRowsToExcel, exportRowsToCSV, exportRowsToPDF } from '../../utils/export'
 import { roundCurrency } from '../../utils/calc'
@@ -326,9 +327,12 @@ function SingleVepariLedger() {
             ) : null
           }
           renderExpanded={(line) => (
-            <p className="text-caption text-ink-muted">
-              {line.bill.farmerName} · {formatDate(line.bill.date)}
-            </p>
+            <div className="space-y-2">
+              <p className="text-caption text-ink-muted">
+                {line.bill.farmerName} · {formatDate(line.bill.date)}
+              </p>
+              <CreatedByLine record={line.bill} currentUser={user} />
+            </div>
           )}
           footer={
             visibleLines.length > 0 ? (

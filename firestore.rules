@@ -115,7 +115,7 @@ service cloud.firestore {
             request.auth.uid == userId &&
             request.resource.data.role == resource.data.role &&
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'gender', 'birthday', 'email']));
+              .hasOnly(['name', 'gender', 'birthday', 'email', 'location']));
         allow delete: if isOwner(businessId);
         allow create: if isOwner(businessId) ||
           // First owner while business doc does not exist yet (batched with business create).
@@ -198,7 +198,7 @@ service cloud.firestore {
             request.resource.data.dakhlaNumber == resource.data.dakhlaNumber ||
             isOwner(businessId)
           );
-        allow delete: if false;
+        allow delete: if isOwner(businessId);
       }
 
       match /payments/{paymentId} {
@@ -214,7 +214,7 @@ service cloud.firestore {
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
           request.resource.data.date is string;
-        allow delete: if false;
+        allow delete: if isOwner(businessId);
       }
 
       // Vepari settlement — same shape/rules as farmer payments (Rojmer).
@@ -230,7 +230,7 @@ service cloud.firestore {
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
           request.resource.data.date is string;
-        allow delete: if false;
+        allow delete: if isOwner(businessId);
       }
 
       match /counters/{counterId} {

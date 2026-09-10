@@ -12,7 +12,7 @@
 | Hosting | Firebase Hosting | Free tier, HTTPS by default, works with PWA |
 | PWA layer | Vite PWA plugin (Workbox) | Installable app, offline shell caching, background sync |
 | State management | React Context + hooks (no Redux) | App is not complex enough to need Redux; keep it simple |
-| Export | SheetJS (xlsx), jsPDF | Client-side Excel/CSV and PDF generation — no server/paid export service needed |
+| Export | ExcelJS, jsPDF | Client-side Excel (.xlsx) / CSV and PDF generation — no server/paid export service needed |
 | Archive | JSZip | Bundles the year-end export set into a single downloadable zip, entirely client-side |
 
 **Explicitly not using**: React Native / Flutter (a PWA covers phone + desktop from one codebase, no app-store approval delay), a custom Node.js backend (Firestore removes the need to write and host sync/API logic ourselves).
@@ -66,8 +66,11 @@ shreenath-traders-management/
 │   │   ├── dashboard/
 │   │   ├── bills/                  # કેશ મેમો entry + list
 │   │   ├── vepariDakhla/
+│   │   ├── vepariPay/              # vepari settlement (dakhla totals)
 │   │   ├── rojmer/
 │   │   ├── jansaSilak/
+│   │   ├── reports/                # CA read-only reports
+│   │   ├── admin/                  # users + offline queue (owner)
 │   │   └── settings/
 │   ├── components/                 # shared UI: ledger row, stamp badge, etc.
 │   ├── context/                    # auth/role context (Phase 1) — read app-wide via hooks
@@ -119,7 +122,7 @@ Bills, payments, and manual silak entries can all be **edited or corrected** aft
 
 ## 5b. Export & year-end archive
 
-- Every list screen (bills, a vepari's dakhla, rojmer, silak) has an "Export" action that builds an Excel/CSV/PDF client-side (SheetJS/jsPDF) from the currently-filtered data — no server round trip needed beyond the initial data fetch.
+- Every list screen (bills, a vepari's dakhla, rojmer, silak, vepari pay, reports) has an "Export" action that builds an Excel/CSV/PDF client-side (ExcelJS/jsPDF) from the currently-filtered data — no server round trip needed beyond the initial data fetch.
 - The year-end archive (prd.md §4.5) runs the same export logic for every module across the closing financial year, bundles the results with JSZip, and triggers a browser download. This is a **client-side, on-demand action confirmed by the user** — not a scheduled server job — specifically so it doesn't require Cloud Functions (see §6 below).
 
 ## 6. Cost constraint & free-tier design
