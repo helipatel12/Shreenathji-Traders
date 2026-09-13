@@ -1,14 +1,14 @@
 // Shared jansa-silak auto entries — dashboard KPI and Silak screen
 // must use the same formula.
 //
-// Owner-confirmed (2026-09-08):
+// Owner-confirmed (2026-09-08, updated 2026-09-12):
 //   જમા = that day's total commission
 //        + that day's total shes + tolai
 //        + khedut rojmer pending (bill total − payments up to that day)
-//        + that day's cleared cheques (rojmer payments type=cheque)
 //   ઉધાર = vepari dakhla totals (કુલ બેસણું, one line per vepari per day)
+//        + that day's cleared cheques (rojmer payments type=cheque)
 //        + manual entries
-//   (Auto cash payments are NOT in udhar.)
+//   (Auto cash payments are NOT auto-posted.)
 //   Opening balance still rolls from previous closing.
 
 import {
@@ -154,8 +154,8 @@ export function buildSilakLedgerEntries({
     auto.push(row)
   }
 
-  // That day's cleared cheques (rojmer cheque payments) → જમા
-  // Cash payments are intentionally not auto-posted to udhar.
+  // That day's cleared cheques (rojmer cheque payments) → ઉધાર
+  // Cash payments are intentionally not auto-posted.
   for (const payment of excludeVoided(payments)) {
     if (!payment.date || !payment.billId) continue
     if (String(payment.type || '').toLowerCase() !== 'cheque') continue
@@ -164,13 +164,13 @@ export function buildSilakLedgerEntries({
     const farmer = bill.farmerName || ''
     auto.push({
       date: payment.date,
-      side: 'jama',
+      side: 'udhar',
       label: `${chequeLabel} — ${farmer}`.trim(),
       amount: payment.amount,
       isManual: false,
       createdBy: payment.createdBy || null,
       createdByName: payment.createdByName || null,
-      key: `jama-cheque-${payment.firestoreId || payment.id}`,
+      key: `udhar-cheque-${payment.firestoreId || payment.id}`,
     })
   }
 

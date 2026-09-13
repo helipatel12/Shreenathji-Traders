@@ -129,6 +129,27 @@ export async function allocateEntryNumberRemote(minNext = 1) {
 }
 
 /**
+ * If the cloud counter drifted ahead of live bills (deletes / failed creates),
+ * snap it back to `floor` (max active + 1) so the next note is continuous.
+ */
+export async function reclaimEntryNumberCounter(floor) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return
+  const nextFloor = Math.max(1, Number(floor) || 1)
+  try {
+    await runTransaction(db, async (transaction) => {
+      const ref = entryNumberCounterRef()
+      const snap = await transaction.get(ref)
+      const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
+      if (stored > nextFloor) {
+        transaction.set(ref, { next: nextFloor }, { merge: true })
+      }
+    })
+  } catch (err) {
+    console.error('Remote entryNumber counter reclaim failed:', err)
+  }
+}
+
+/**
  * Atomically allocate the next દાખલા નં. when online.
  */
 export async function allocateDakhlaNumberRemote(minNext = 1) {
@@ -146,6 +167,24 @@ export async function allocateDakhlaNumberRemote(minNext = 1) {
   } catch (err) {
     console.error('Remote dakhlaNumber allocate failed — using local:', err)
     return null
+  }
+}
+
+/** Snap dakhla counter back when it drifted ahead of live day-groups. */
+export async function reclaimDakhlaNumberCounter(floor) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return
+  const nextFloor = Math.max(1, Number(floor) || 1)
+  try {
+    await runTransaction(db, async (transaction) => {
+      const ref = dakhlaNumberCounterRef()
+      const snap = await transaction.get(ref)
+      const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
+      if (stored > nextFloor) {
+        transaction.set(ref, { next: nextFloor }, { merge: true })
+      }
+    })
+  } catch (err) {
+    console.error('Remote dakhlaNumber counter reclaim failed:', err)
   }
 }
 

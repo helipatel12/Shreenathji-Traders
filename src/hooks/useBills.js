@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { allocateEntryNumberRemote, allocateDakhlaNumberRemote, billCollectionRef, billDocRef, paymentDocRef, vepariPaymentDocRef } from '../firebase/firestore'
+import { allocateEntryNumberRemote, reclaimEntryNumberCounter, allocateDakhlaNumberRemote, reclaimDakhlaNumberCounter, billCollectionRef, billDocRef, paymentDocRef, vepariPaymentDocRef } from '../firebase/firestore'
 import { useAuth } from './useAuth'
 import { computeBillTotal } from '../utils/calc'
 import { diffFields } from '../utils/editHistory'
 import { notifyLocalDataChanged } from '../utils/localDataEvents'
+import { softVoidLocalRow } from '../utils/softVoid'
 import {
   applyCollectionSnapshot,
   dedupeTableByFirestoreId,
@@ -35,33 +36,25 @@ function isValidEntryNumber(value) {
 }
 
 /**
- * Next નોંધ નં. = one past the highest number ever used (including
- * voided). Never fills gaps — sequence stays 1, 2, 3… ascending.
+ * Next નોંધ નં. = one past the highest active bill.
+ * Voided / pending-delete numbers are ignored so deletes don't inflate the sequence.
  */
 async function nextEntryNumberLocal() {
-  return (await maxEntryNumberSeen()) + 1
-}
-
-async function maxEntryNumberSeen() {
   const rows = await localDb.bills.toArray()
   let max = 0
   for (const row of rows) {
-    if (row.syncStatus === 'pendingDelete') continue
+    if (row.isVoided || row.syncStatus === 'pendingDelete') continue
     const n = Number(row.entryNumber)
     if (Number.isFinite(n) && n > max) max = n
   }
-  return max
-}
-
-async function nextDakhlaNumberLocal() {
-  return (await maxDakhlaNumberSeen()) + 1
+  return max + 1
 }
 
 async function maxDakhlaNumberSeen() {
   const rows = await localDb.bills.toArray()
   let max = 0
   for (const row of rows) {
-    if (row.syncStatus === 'pendingDelete') continue
+    if (row.isVoided || row.syncStatus === 'pendingDelete') continue
     const n = Number(row.dakhlaNumber)
     if (Number.isFinite(n) && n > max) max = n
   }
@@ -69,20 +62,30 @@ async function maxDakhlaNumberSeen() {
 }
 
 /**
- * Prefer Firestore counter when online; always ascending (max+1).
- * Never touches numbers already stored on existing bills.
+ * Prefer live max(active)+1. Reclaim drifted cloud counter, then allocate.
+ * Never let an inflated counter skip past the next number (37 → 38, not 45).
  */
 async function allocateEntryNumber() {
-  const floor = (await maxEntryNumberSeen()) + 1
+  const floor = await nextEntryNumberLocal()
+  await reclaimEntryNumberCounter(floor)
   const remote = await allocateEntryNumberRemote(floor)
-  let candidate =
-    remote != null && Number.isFinite(remote) && remote > 0 ? Math.max(remote, floor) : floor
-  while (await isEntryNumberTaken(candidate)) candidate += 1
-  return candidate
+  // After reclaim, remote should equal floor. If reclaim failed and remote is
+  // ahead, still start at floor — only bump when that number is actually taken.
+  let next = floor
+  if (remote != null && Number.isFinite(remote) && remote === floor) {
+    next = remote
+  }
+  while (await isEntryNumberTaken(next)) next += 1
+  if (next > floor) {
+    await reclaimEntryNumberCounter(next)
+    await allocateEntryNumberRemote(next)
+  }
+  return next
 }
 
 async function allocateDakhlaNumber() {
   const floor = (await maxDakhlaNumberSeen()) + 1
+  await reclaimDakhlaNumberCounter(floor)
   const remote = await allocateDakhlaNumberRemote(floor)
   let candidate =
     remote != null && Number.isFinite(remote) && remote > 0 ? Math.max(remote, floor) : floor
@@ -115,7 +118,7 @@ async function persistMissingEntryNumbers() {
   const rows = await localDb.bills.toArray()
   let max = 0
   for (const row of rows) {
-    if (row.syncStatus === 'pendingDelete') continue
+    if (row.isVoided || row.syncStatus === 'pendingDelete') continue
     const n = Number(row.entryNumber)
     if (Number.isFinite(n) && n > 0 && n > max) max = n
   }
@@ -123,6 +126,7 @@ async function persistMissingEntryNumbers() {
   const missing = rows
     .filter(
       (row) =>
+        !row.isVoided &&
         row.syncStatus !== 'pendingDelete' &&
         !isValidEntryNumber(row.entryNumber),
     )
@@ -197,7 +201,7 @@ async function persistMissingDakhlaNumbers() {
 
   let max = 0
   for (const row of rows) {
-    if (row.syncStatus === 'pendingDelete') continue
+    if (row.isVoided || row.syncStatus === 'pendingDelete') continue
     const n = Number(row.dakhlaNumber)
     if (Number.isFinite(n) && n > 0 && n > max) max = n
   }
@@ -336,7 +340,9 @@ export function useBills() {
   async function updateBill(localId, changes, editedBy) {
     const existing = await localDb.bills.get(localId)
     if (!existing) return
-    if (existing.isVoided) throw new Error('BILL_VOIDED')
+    if (existing.isVoided || existing.syncStatus === 'pendingDelete') {
+      throw new Error('BILL_VOIDED')
+    }
 
     // Default: never touch નોંધ / દાખલા નં. on ordinary bill updates.
     // Owner/admin may change them explicitly (manual only — never automatic).
@@ -448,22 +454,9 @@ export function useBills() {
     }
   }
 
-  async function deleteBill(localId) {
+  async function deleteBill(localId, voidedBy) {
     const existing = await localDb.bills.get(localId)
     if (!existing) return
-
-    async function hardDeletePaymentRow(table, payment, docRefFn, label) {
-      if (!payment.firestoreId) {
-        await table.delete(payment.id)
-        return
-      }
-      await table.update(payment.id, { syncStatus: 'pendingDelete' })
-      try {
-        await deleteDoc(docRefFn(payment.firestoreId))
-      } catch (err) {
-        console.error(`${label} delete (cascade from bill) queued locally:`, err)
-      }
-    }
 
     if (existing.firestoreId) {
       const related = await localDb.payments
@@ -471,7 +464,13 @@ export function useBills() {
         .equals(existing.firestoreId)
         .toArray()
       for (const payment of related) {
-        await hardDeletePaymentRow(localDb.payments, payment, paymentDocRef, 'Payment')
+        await softVoidLocalRow(
+          localDb.payments,
+          payment,
+          paymentDocRef,
+          voidedBy,
+          'bill-deleted',
+        )
       }
       notifyLocalDataChanged('payments')
 
@@ -480,29 +479,19 @@ export function useBills() {
         .equals(existing.firestoreId)
         .toArray()
       for (const payment of relatedVepari) {
-        await hardDeletePaymentRow(
+        await softVoidLocalRow(
           localDb.vepariPayments,
           payment,
           vepariPaymentDocRef,
-          'Vepari payment',
+          voidedBy,
+          'bill-deleted',
         )
       }
       notifyLocalDataChanged('vepariPayments')
     }
 
-    if (!existing.firestoreId) {
-      await localDb.bills.delete(localId)
-      await refreshLocal()
-      return
-    }
-
-    await localDb.bills.update(localId, { syncStatus: 'pendingDelete' })
+    await softVoidLocalRow(localDb.bills, existing, billDocRef, voidedBy, 'deleted')
     await refreshLocal()
-    try {
-      await deleteDoc(billDocRef(existing.firestoreId))
-    } catch (err) {
-      console.error('Bill delete queued locally — Firestore sync failed:', err)
-    }
   }
 
   return { bills, loading, addBill, updateBill, deleteBill, voidBill: deleteBill }

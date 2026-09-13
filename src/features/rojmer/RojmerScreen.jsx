@@ -17,7 +17,7 @@ import { usePayments } from '../../hooks/usePayments'
 import { useVeparis } from '../../hooks/useVeparis'
 import { useBusiness } from '../../hooks/useBusiness'
 import { useLocale } from '../../context/LocaleContext'
-import { getBillClearingInfo, excludeVoided } from '../../utils/calc'
+import { getBillClearingInfo, excludeVoided, isRecordExcluded } from '../../utils/calc'
 import { findVepari, vepariDisplayName } from '../../utils/vepari'
 import { resolveCreatedByName } from '../../utils/createdBy'
 import { sortByNoteOrDate, noteSortFilter, dateSortFilter } from '../../utils/tableSort'
@@ -46,14 +46,14 @@ function BillPayments({ bill, payments, canWrite, isOwner, currentUser, onEditPa
         <li
           key={payment.id}
           className={`flex items-center justify-between text-caption gap-2 ${
-            payment.isVoided ? 'opacity-60' : ''
+            isRecordExcluded(payment) ? 'opacity-60' : ''
           }`}
         >
-          <span className={`text-ink ${payment.isVoided ? 'line-through' : ''}`}>
+          <span className={`text-ink ${isRecordExcluded(payment) ? 'line-through' : ''}`}>
             {formatCurrency(payment.amount)} · {t(`rojmer.${payment.type}`)} ·{' '}
             {formatDate(payment.date)}
             {` · ${t('common.createdBy')} ${resolveCreatedByName(payment, currentUser)}`}
-            {payment.isVoided ? ` · ${t('common.voided')}` : ''}
+            {isRecordExcluded(payment) ? ` · ${t('common.voided')}` : ''}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
             )}
@@ -61,7 +61,7 @@ function BillPayments({ bill, payments, canWrite, isOwner, currentUser, onEditPa
               <span className="text-ink-muted"> · {t('common.edited')}</span>
             )}
           </span>
-          {!payment.isVoided && (canWrite || isOwner) && (
+          {!isRecordExcluded(payment) && (canWrite || isOwner) && (
             <span className="flex items-center gap-0.5 shrink-0">
               {canWrite && (
                 <button
@@ -239,7 +239,7 @@ export default function RojmerScreen() {
   }
 
   async function handleConfirmVoid() {
-    await deletePayment(voidingPayment.id)
+    await deletePayment(voidingPayment.id, user?.email)
     setVoidingPayment(null)
   }
 

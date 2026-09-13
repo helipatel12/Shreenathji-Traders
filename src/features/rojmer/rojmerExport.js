@@ -9,7 +9,7 @@
 // Voided payments are skipped (see architecture.md §5a) since they no
 // longer represent real money received.
 
-import { formatCurrency } from '../../utils/calc'
+import { formatCurrency, excludeVoided } from '../../utils/calc'
 import { vepariDisplayName } from '../../utils/vepari'
 import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
@@ -19,8 +19,8 @@ export function buildRojmerRows(rows, veparis, payments) {
 
   for (const { bill, balance, isCleared, clearingDate } of rows) {
     const vepari = vepariDisplayName(veparis, bill.vepariId)
-    const billPayments = payments
-      .filter((p) => p.billId === bill.firestoreId && !p.isVoided)
+    const billPayments = excludeVoided(payments)
+      .filter((p) => p.billId === bill.firestoreId)
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 

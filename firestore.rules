@@ -1,7 +1,8 @@
 // Firestore security rules — Shreenathji Traders (single-business deploy).
 //
 // - Members only read/write inside their business
-// - owner: full access including settings/users/void/silak delete
+// - owner: full access including settings/users/void; silak/vepari hard-delete
+// - Financial rows (bills/payments): soft-void only — allow delete: if false
 // - staff: bills, payments, silak create/update (manual); no settings/users
 // - ca: read-only everywhere
 // - Bootstrap: first verified signed-in user may create business (with
@@ -198,7 +199,7 @@ service cloud.firestore {
             request.resource.data.dakhlaNumber == resource.data.dakhlaNumber ||
             isOwner(businessId)
           );
-        allow delete: if isOwner(businessId);
+        allow delete: if false;
       }
 
       match /payments/{paymentId} {
@@ -214,7 +215,7 @@ service cloud.firestore {
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
           request.resource.data.date is string;
-        allow delete: if isOwner(businessId);
+        allow delete: if false;
       }
 
       // Vepari settlement — same shape/rules as farmer payments (Rojmer).
@@ -230,7 +231,7 @@ service cloud.firestore {
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
           request.resource.data.date is string;
-        allow delete: if isOwner(businessId);
+        allow delete: if false;
       }
 
       match /counters/{counterId} {

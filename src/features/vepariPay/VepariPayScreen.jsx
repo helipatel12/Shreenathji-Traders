@@ -13,6 +13,7 @@ import { useLocale } from '../../context/LocaleContext'
 import {
   getDakhlaClearingInfo,
   excludeVoided,
+  isRecordExcluded,
   resolveRates,
   allocateVepariPaymentFifo,
   summarizeVepariDayClearing,
@@ -47,14 +48,14 @@ function GroupPayments({ billIds, payments, canWrite, isOwner, currentUser, onEd
         <li
           key={payment.id}
           className={`flex items-center justify-between text-caption gap-2 ${
-            payment.isVoided ? 'opacity-60' : ''
+            isRecordExcluded(payment) ? 'opacity-60' : ''
           }`}
         >
-          <span className={`text-ink ${payment.isVoided ? 'line-through' : ''}`}>
+          <span className={`text-ink ${isRecordExcluded(payment) ? 'line-through' : ''}`}>
             {formatCurrency(payment.amount)} · {t(`vepariPay.${payment.type}`)} ·{' '}
             {formatDate(payment.date)}
             {` · ${t('common.createdBy')} ${resolveCreatedByName(payment, currentUser)}`}
-            {payment.isVoided ? ` · ${t('common.voided')}` : ''}
+            {isRecordExcluded(payment) ? ` · ${t('common.voided')}` : ''}
             {payment.syncStatus === 'pending' && (
               <span className="text-accent"> · {t('common.syncing')}</span>
             )}
@@ -62,7 +63,7 @@ function GroupPayments({ billIds, payments, canWrite, isOwner, currentUser, onEd
               <span className="text-ink-muted"> · {t('common.edited')}</span>
             )}
           </span>
-          {!payment.isVoided && (canWrite || isOwner) && (
+          {!isRecordExcluded(payment) && (canWrite || isOwner) && (
             <span className="flex items-center gap-0.5 shrink-0">
               {canWrite && (
                 <button
@@ -299,7 +300,7 @@ export default function VepariPayScreen() {
   }
 
   async function handleConfirmVoid() {
-    await deletePayment(voidingPayment.id)
+    await deletePayment(voidingPayment.id, user?.email)
     setVoidingPayment(null)
   }
 

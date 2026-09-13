@@ -25,29 +25,33 @@ import {
   buildBillListPdfColumns,
 } from './billExport'
 
-function BillExpandedMeta({ bill, currentUser }) {
+function EditHistoryList({ editHistory }) {
   const { t, lang } = useLocale()
-  const editHistory = bill.editHistory
+  if (!editHistory?.length) return null
   const locale = lang === 'gu' ? 'gu-IN' : 'en-IN'
+  return (
+    <div className="mt-4 pt-4 border-t border-border">
+      <p className="text-caption text-ink-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
+        <History size={14} strokeWidth={1.75} />
+        {t('bills.editHistory')}
+      </p>
+      <ul className="space-y-1">
+        {editHistory.map((entry, i) => (
+          <li key={i} className="text-caption text-ink-muted">
+            <span className="text-ink">{entry.field}</span> —{' '}
+            {new Date(entry.editedAt).toLocaleString(locale)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function BillExpandedMeta({ bill, currentUser }) {
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-3">
       <CreatedByLine record={bill} currentUser={currentUser} />
-      {editHistory?.length ? (
-        <div>
-          <p className="text-caption text-ink-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <History size={14} strokeWidth={1.75} />
-            {t('bills.editHistory')}
-          </p>
-          <ul className="space-y-1">
-            {editHistory.map((entry, i) => (
-              <li key={i} className="text-caption text-ink-muted">
-                <span className="text-ink">{entry.field}</span> —{' '}
-                {new Date(entry.editedAt).toLocaleString(locale)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <EditHistoryList editHistory={bill.editHistory} />
     </div>
   )
 }
@@ -178,7 +182,7 @@ export default function BillsScreen() {
   }
 
   async function handleConfirmDelete() {
-    await deleteBill(voidingBillId)
+    await deleteBill(voidingBillId, user?.email)
     setVoidingBillId(null)
   }
 

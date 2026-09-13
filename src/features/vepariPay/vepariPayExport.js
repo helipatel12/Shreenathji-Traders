@@ -1,7 +1,7 @@
 // Vepari settlement export — one day-group per vepari (combined dakhla
 // total). Payment rows still expand under that day.
 
-import { formatCurrency } from '../../utils/calc'
+import { formatCurrency, excludeVoided } from '../../utils/calc'
 import { vepariDisplayName } from '../../utils/vepari'
 import { formatDisplayDate } from '../../utils/dates'
 import gu from '../../locales/gu.json'
@@ -12,8 +12,8 @@ export function buildVepariPayRows(rows, veparis, payments) {
   for (const row of rows) {
     const vepari = vepariDisplayName(veparis, row.vepariId)
     const billIds = new Set(row.billIds || [])
-    const groupPayments = payments
-      .filter((p) => billIds.has(p.billId) && !p.isVoided)
+    const groupPayments = excludeVoided(payments)
+      .filter((p) => billIds.has(p.billId))
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 

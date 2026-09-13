@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
 import { paymentCollectionRef, paymentDocRef } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
@@ -11,6 +11,7 @@ import {
   nextSyncRevision,
 } from '../utils/syncHelpers'
 import { parseLocaleNumber } from '../utils/numbers'
+import { softVoidLocalRow } from '../utils/softVoid'
 
 const EDITABLE_FIELDS = ['amount', 'type', 'date']
 
@@ -90,7 +91,9 @@ export function usePayments() {
   async function updatePayment(localId, changes, editedBy) {
     const existing = await localDb.payments.get(localId)
     if (!existing) return
-    if (existing.isVoided) throw new Error('PAYMENT_VOIDED')
+    if (existing.isVoided || existing.syncStatus === 'pendingDelete') {
+      throw new Error('PAYMENT_VOIDED')
+    }
     // billId is immutable (H7) — ignore attempts to retarget.
     const normalized = { ...changes }
     delete normalized.billId
@@ -117,21 +120,11 @@ export function usePayments() {
     }
   }
 
-  async function deletePayment(localId) {
+  async function deletePayment(localId, voidedBy) {
     const existing = await localDb.payments.get(localId)
     if (!existing) return
-    if (!existing.firestoreId) {
-      await localDb.payments.delete(localId)
-      await refreshLocal()
-      return
-    }
-    await localDb.payments.update(localId, { syncStatus: 'pendingDelete' })
+    await softVoidLocalRow(localDb.payments, existing, paymentDocRef, voidedBy, 'deleted')
     await refreshLocal()
-    try {
-      await deleteDoc(paymentDocRef(existing.firestoreId))
-    } catch (err) {
-      console.error('Payment delete queued locally — Firestore sync failed:', err)
-    }
   }
 
   return { payments, loading, addPayment, updatePayment, deletePayment, voidPayment: deletePayment }

@@ -1,9 +1,9 @@
 // Jansa Silak (daily cash position) — Phase 7.
 //
-// Owner-confirmed (2026-09-08):
-//   જમા = day commission + day shes/tolai + khedut pending (rojmer) + cleared cheques
-//   ઉધાર = vepari dakhla (per vepari per day) + manual entries
-//   (Auto cash payments are not in udhar.)
+// Owner-confirmed (2026-09-08, updated 2026-09-12):
+//   જમા = day commission + day shes/tolai + khedut pending (rojmer)
+//   ઉધાર = vepari dakhla (per vepari per day) + cleared cheques + manual entries
+//   (Auto cash payments are not auto-posted.)
 //   Opening = previous day's closing
 
 import { useMemo } from 'react'

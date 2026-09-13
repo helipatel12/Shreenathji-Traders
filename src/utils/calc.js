@@ -40,8 +40,13 @@ export function isRecordVoided(record) {
   return v === true || v === 1 || v === 'true' || v === '1'
 }
 
+/** Hidden from books: voided or stuck pending hard-delete. */
+export function isRecordExcluded(record) {
+  return isRecordVoided(record) || record?.syncStatus === 'pendingDelete'
+}
+
 export function excludeVoided(records) {
-  return (records || []).filter((r) => !isRecordVoided(r))
+  return (records || []).filter((r) => !isRecordExcluded(r))
 }
 
 export function getBillClearingInfo(bill, payments = []) {
