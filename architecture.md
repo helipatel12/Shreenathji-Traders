@@ -88,28 +88,59 @@ shreenath-traders-management/
 
 ## 4. Data model (Firestore collections)
 
+Companies are stored in the existing `businesses` collection so the live
+Shreenathji Traders documents keep working. In the UI this is the **companies**
+table. Platform identity lives in a top-level `users` table (`companyId` is
+null for Master Admin).
+
 ```
-businesses/{businessId}
-  name, financialYearStart: "04-01"
+users/{userId}                              # platform identity
+  role: "master_admin" | "company_admin" | "staff" | "ca"
+  companyId: string | null                  # null for Master Admin
+  email, name, status: "active" | "disabled"
 
-businesses/{businessId}/users/{userId}
-  name, email, role: "owner" | "staff" | "ca", location, phone?
+invites/{emailLower}                        # lookup so invitees find their company
+  companyId, role, status: "pending" | "accepted"
 
-businesses/{businessId}/veparis/{vepariId}
-  name, village, customRates?: { tolai, shes, commission }
+platform/state                              # one-time Master Admin bootstrap lock
+  masterAdminUid, masterAdminEmail
 
-businesses/{businessId}/bills/{billId}
+businesses/{companyId}                      # companies table
+  name, companyId, status: "active" | "suspended" | "deleted"
+  financialYearStart: "04-01"
+  createdByUid, adminUid, adminEmail
+  ownerName, address, mobile, licenseNumber, defaultRates?
+
+businesses/{companyId}/users/{userId}
+  name, email, role: "company_admin" | "owner" (legacy) | "staff" | "ca", location
+  companyId
+
+businesses/{companyId}/invites/{email}
+
+businesses/{companyId}/veparis/{vepariId}
+  name, village, customRates?, companyId
+
+businesses/{companyId}/bills/{billId}
   farmerName, farmerVillage, vepariId, date, items: [{type, weightKg, ratePer20kg, amount}],
-  totalAmount, createdBy, createdAt, locationId
+  totalAmount, createdBy, createdAt, locationId, companyId
 
-businesses/{businessId}/payments/{paymentId}
-  billId, amount, type: "cash" | "cheque", date, createdBy, createdAt
+businesses/{companyId}/payments/{paymentId}
+  billId, amount, type: "cash" | "cheque", date, createdBy, createdAt, companyId
   # rojmer balance = bill.totalAmount - sum(payments where billId matches)
 
-businesses/{businessId}/silakEntries/{entryId}
-  date, side: "jama" | "udhar", label, amount, isManual: boolean, createdBy
+businesses/{companyId}/silakEntries/{entryId}
+  date, side: "jama" | "udhar", label, amount, isManual: boolean, createdBy, companyId
   # daily closing balance is always computed, never stored as a mutable total
 ```
+
+**Tenant isolation:** every ledger collection is nested under `businesses/{companyId}`
+and every document is also stamped with `companyId`. Firestore rules reject
+cross-company reads/writes. After login, Master Admin lands on `/platform`;
+company users land on their own dashboard. Public signup cannot create a
+company — only Master Admin can, then the Company Admin is invited.
+
+`owner` on a company user doc is the legacy name for Company Admin (existing
+Shreenathji Traders members). New admins are stored as `company_admin`.
 
 ## 5a. Editing derived data safely
 

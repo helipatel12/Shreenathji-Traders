@@ -42,7 +42,7 @@ export default function SettingsScreen() {
   const { t } = useLocale()
 
   const displayName = user?.name || user?.email || ''
-  const roleLabel = role ? t(`roles.${role}`) : ''
+  const roleLabel = role ? t(`roles.${role === 'owner' ? 'company_admin' : role}`) : ''
 
   return (
     <div className="max-w-6xl">

@@ -13,15 +13,23 @@
 import { useEffect, useState } from 'react'
 import { onSnapshot, updateDoc } from 'firebase/firestore'
 import { businessRef } from '../firebase/firestore'
+import { useAuth } from './useAuth'
 
 export function useBusiness() {
+  const { companyId } = useAuth()
   const [business, setBusiness] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    if (!companyId) {
+      setBusiness(null)
+      setLoading(false)
+      return undefined
+    }
+    setLoading(true)
     const unsubscribe = onSnapshot(
-      businessRef(),
+      businessRef(companyId),
       (snap) => {
         setBusiness(snap.exists() ? { id: snap.id, ...snap.data() } : null)
         setError(null)
@@ -34,10 +42,11 @@ export function useBusiness() {
       },
     )
     return unsubscribe
-  }, [])
+  }, [companyId])
 
   async function updateBusiness(changes) {
-    await updateDoc(businessRef(), changes)
+    if (!companyId) throw new Error('No company selected')
+    await updateDoc(businessRef(companyId), changes)
   }
 
   return { business, loading, error, updateBusiness }

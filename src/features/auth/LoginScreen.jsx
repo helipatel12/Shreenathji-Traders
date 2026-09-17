@@ -12,8 +12,10 @@ import {
   getAuthActionFromUrl,
   clearAuthActionFromUrl,
   applyEmailVerificationCode,
+  extractOobCode,
   authErrorLocaleKey,
 } from '../../firebase/auth'
+import OtpInput from './OtpInput'
 import { stashPendingDisplayName } from '../../context/AuthContext'
 import { useLocale } from '../../context/LocaleContext'
 import LanguageToggle from '../../components/LanguageToggle'
@@ -29,6 +31,7 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [resetCode, setResetCode] = useState('')
+  const [codeFromLink, setCodeFromLink] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [smsCode, setSmsCode] = useState('')
@@ -43,7 +46,9 @@ export default function LoginScreen() {
   const isValidPassword = password.length >= 6
   const isValidNewPassword = newPassword.length >= 6
   const isValidPhone = phone.replace(/\D/g, '').length >= 10
-  const isValidResetCode = resetCode.trim().length >= 8
+  const resolvedResetCode = extractOobCode(resetCode)
+  const isSixDigitReset = /^\d{6}$/.test(String(resetCode || '').trim())
+  const isValidResetCode = resolvedResetCode.length >= 8 && !isSixDigitReset
 
   // Handle inbox links: password reset + email verification.
   useEffect(() => {
@@ -57,21 +62,25 @@ export default function LoginScreen() {
       clearAuthActionFromUrl()
       return
     }
-    if (action.mode === 'resetPassword' && !action.oobCode) {
-      setMode('signin')
-      setInfoMessage(t('auth.resetPasswordOk'))
-      clearAuthActionFromUrl()
-      return
-    }
-
     if (!action.oobCode) return
 
     if (action.mode === 'resetPassword') {
       setMode('forgot')
       setForgotStep('code')
       setResetCode(action.oobCode)
+      setCodeFromLink(true)
       setInfoMessage(t('auth.resetCodeReady'))
       clearAuthActionFromUrl()
+      verifyResetCode(action.oobCode)
+        .then((accountEmail) => {
+          if (accountEmail) setEmail(accountEmail)
+        })
+        .catch((err) => {
+          console.error('Reset link is invalid:', err)
+          setCodeFromLink(false)
+          setResetCode('')
+          setErrorMessage(friendlyAuthError(err))
+        })
       return
     }
 
@@ -111,6 +120,7 @@ export default function LoginScreen() {
     if (next === 'forgot') {
       setForgotStep('email')
       setResetCode('')
+      setCodeFromLink(false)
       setNewPassword('')
       setConfirmNewPassword('')
     }
@@ -155,6 +165,8 @@ export default function LoginScreen() {
     setInfoMessage('')
     try {
       await sendPasswordReset(email.trim())
+      setResetCode('')
+      setCodeFromLink(false)
       setForgotStep('code')
       setInfoMessage(t('auth.resetSentEnterCode'))
     } catch (err) {
@@ -168,6 +180,10 @@ export default function LoginScreen() {
   async function handleConfirmReset(e) {
     e.preventDefault()
     if (submitting) return
+    if (isSixDigitReset) {
+      setErrorMessage(t('auth.errResetNeedsLink'))
+      return
+    }
     if (!isValidResetCode) {
       setErrorMessage(t('auth.errInvalidResetCode'))
       return
@@ -191,6 +207,7 @@ export default function LoginScreen() {
       setNewPassword('')
       setConfirmNewPassword('')
       setResetCode('')
+      setCodeFromLink(false)
       setForgotStep('email')
       setMode('signin')
       setInfoMessage(t('auth.resetPasswordOk'))
@@ -258,10 +275,15 @@ export default function LoginScreen() {
   let subhead = t('auth.loginSubhead')
   if (mode === 'signup') {
     headline = t('auth.signupHeadline')
-    subhead = t('auth.loginSubhead')
+    subhead = t('auth.signupSubhead')
   } else if (mode === 'forgot') {
     headline = t('auth.forgotHeadline')
-    subhead = forgotStep === 'code' ? t('auth.enterResetCodeHint') : t('auth.forgotSubhead')
+    subhead =
+      forgotStep === 'code'
+        ? codeFromLink
+          ? t('auth.resetCodeReady')
+          : t('auth.enterResetCodeHint')
+        : t('auth.forgotSubhead')
   } else if (mode === 'alternate') {
     headline = t('auth.alternateHeadline')
     subhead = t('auth.alternateSubhead')
@@ -482,24 +504,34 @@ export default function LoginScreen() {
 
           {mode === 'forgot' && forgotStep === 'code' && (
             <form onSubmit={handleConfirmReset} className="flex flex-col gap-4 flex-1">
-              <p className="text-caption text-ink-muted">{t('auth.enterResetCodeHint')}</p>
-              <div>
-                <label
-                  htmlFor="reset-code"
-                  className="block text-[11px] uppercase tracking-wide text-ink-muted mb-1.5 font-medium"
-                >
-                  {t('auth.resetCodeLabel')}
-                </label>
-                <input
-                  id="reset-code"
-                  type="text"
-                  autoComplete="one-time-code"
-                  value={resetCode}
-                  onChange={(e) => setResetCode(e.target.value.trim())}
-                  className={inputClass}
-                  placeholder={t('auth.resetCodePlaceholder')}
-                />
-              </div>
+              <p className="text-caption text-ink-muted">
+                {codeFromLink ? t('auth.resetCodeReady') : t('auth.enterResetCodeHint')}
+              </p>
+              {!codeFromLink && (
+                <div>
+                  <label
+                    htmlFor="otp-0"
+                    className="block text-[11px] uppercase tracking-wide text-ink-muted mb-1.5 font-medium"
+                  >
+                    {t('auth.resetCodeLabel')}
+                  </label>
+                  <OtpInput
+                    id="otp"
+                    value={/^\d{0,6}$/.test(String(resetCode || '').trim()) ? resetCode : ''}
+                    onChange={(digits) => {
+                      setResetCode(digits)
+                      setCodeFromLink(false)
+                    }}
+                    onPasteLink={(link) => {
+                      const token = extractOobCode(link)
+                      setResetCode(token || link)
+                      if (token.length >= 8) setCodeFromLink(true)
+                    }}
+                    autoFocus
+                  />
+                  <p className="text-caption text-ink-muted mt-2">{t('auth.resetCodePasteHint')}</p>
+                </div>
+              )}
               <div>
                 <label
                   htmlFor="new-password"
@@ -542,7 +574,11 @@ export default function LoginScreen() {
               )}
               <button
                 type="submit"
-                disabled={submitting || !isValidResetCode || !isValidNewPassword}
+                disabled={
+                  submitting ||
+                  !isValidNewPassword ||
+                  !(isValidResetCode || isSixDigitReset)
+                }
                 className="w-full min-h-12 rounded-full bg-accent hover:bg-accent-hover text-white font-semibold disabled:opacity-40"
               >
                 {submitting ? t('auth.savingPassword') : t('auth.saveNewPassword')}
@@ -551,6 +587,8 @@ export default function LoginScreen() {
                 type="button"
                 onClick={() => {
                   setForgotStep('email')
+                  setCodeFromLink(false)
+                  setResetCode('')
                   setErrorMessage('')
                   setInfoMessage('')
                 }}
@@ -663,14 +701,11 @@ export default function LoginScreen() {
                       >
                         {t('auth.codeLabel')}
                       </label>
-                      <input
+                      <OtpInput
                         id="sms-code"
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
                         value={smsCode}
-                        onChange={(e) => setSmsCode(e.target.value)}
-                        className={inputClass}
+                        onChange={setSmsCode}
+                        autoFocus
                       />
                     </div>
                   )}

@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { vepariPaymentCollectionRef, vepariPaymentDocRef } from '../firebase/firestore'
+import { vepariPaymentCollectionRef, vepariPaymentDocRef, stampCompany } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
 import { onLocalDataChanged } from '../utils/localDataEvents'
 import {
@@ -63,7 +63,7 @@ export function useVepariPayments() {
   }, [refreshLocal])
 
   async function addPayment({ billId, amount, type, date, createdBy, createdByName }) {
-    const payload = {
+    const payload = stampCompany({
       billId,
       amount: parseLocaleNumber(amount),
       type,
@@ -71,7 +71,7 @@ export function useVepariPayments() {
       createdBy,
       createdByName: String(createdByName || '').trim() || null,
       editHistory: [],
-    }
+    })
     const ref = doc(vepariPaymentCollectionRef())
     const createdAtLocal = Date.now()
     const localId = await localDb.vepariPayments.add({

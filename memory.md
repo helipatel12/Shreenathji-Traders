@@ -16,8 +16,8 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 
 **Phase**: Phases 0–10 code-complete. **Phase 11** = owner multi-device offline trial (checklist in `phases.md`). Live: https://shreenath-traders.web.app. **Never deploy without explicit owner ask.**
 
-**Currently working on**: — Phase 11 owner checklist ready; docs aligned to ExcelJS
-**Blocked on**: owner Phase 11 device trial; Jansa Silak જમા/ઉધાર vs paper; whether vepariPayments should feed silak
+**Currently working on**: multi-tenant Master Admin / Company Admin (Firebase), isolation + RBAC
+**Blocked on**: owner must deploy `firestore.rules` before the new login/tenant flow works on production; Phase 11 device trial; Jansa Silak જમા/ઉધાર vs paper
 
 **Owner domain map (2026-09-08):**
 - **Bills** = buy goods from khedut/farmer
@@ -26,6 +26,8 @@ Living notes on project progress. Update this file whenever a phase, feature, or
 - **Vepari pay** (`/vepari-pay`) = payment settlement for vepari (same UX as Rojmer; balance = dakhla line total)
 
 ## Completed
+
+- 2026-09-13 — **Multi-tenant SaaS**: Master Admin platform (`/platform`) can add/pause/remove companies and assign Company Admins by invite. Each company is `businesses/{companyId}` with `companyId` stamped on every ledger row. Top-level `users/{uid}` holds `role` + `companyId` (null for Master Admin). Login redirects Master Admin to the global dashboard and company users to their own books. Existing Shreenathji Traders data stays on `businesses/shreenath-traders`. **Needs `firestore.rules` deploy** before production uses this.
 
 - 2026-07-21 — Vite + React scaffold created (`npm create vite@latest -- --template react`).
 - 2026-07-21 — Tailwind CSS v4 installed and wired via `@tailwindcss/vite` (CSS-first config, no `tailwind.config.js` needed in v4).

@@ -1,14 +1,18 @@
-// Firestore security rules — Shreenathji Traders (single-business deploy).
+// Firestore security rules — multi-tenant (companies stored as `businesses`).
 //
-// - Members only read/write inside their business
-// - owner: full access including settings/users/void; silak/vepari hard-delete
-// - Financial rows (bills/payments): soft-void only — allow delete: if false
-// - staff: bills, payments, silak create/update (manual); no settings/users
-// - ca: read-only everywhere
-// - Bootstrap: first verified signed-in user may create business (with
-//   createdByUid) + owner user doc; orphan business claimable by creator
-// - Invites: role must be staff|ca; invitee creates users/{uid} with that role
-// - Email compares use .lower() to match client-normalized invite ids
+// Isolation:
+//   - Each company's ledgers live under businesses/{companyId}/…
+//   - Members only read/write their own company
+//   - Master Admin (users/{uid}.role == master_admin) can manage every company
+//   - Public signup cannot create a company (invite or one-time bootstrap only)
+//
+// Roles:
+//   - master_admin: platform operator (companyId null)
+//   - company_admin / owner (legacy): company books + staff
+//   - staff: ledger write, no settings/users
+//   - ca: read-only
+//
+// Financial rows (bills/payments/vepariPayments): soft-void only.
 
 rules_version = '2';
 
@@ -27,44 +31,92 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
 
-    function userDoc(businessId) {
-      return get(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    function platformUserPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
-    function role(businessId) {
-      return userDoc(businessId).data.role;
+    function isMasterAdmin() {
+      return isSignedIn() && (
+        isDesignatedMasterEmail() ||
+        (
+          exists(platformUserPath()) &&
+          get(platformUserPath()).data.role == 'master_admin' &&
+          get(platformUserPath()).data.get('status', 'active') != 'disabled'
+        )
+      );
     }
 
-    function isMember(businessId) {
+    function userDoc(companyId) {
+      return get(/databases/$(database)/documents/businesses/$(companyId)/users/$(request.auth.uid));
+    }
+
+    function role(companyId) {
+      return userDoc(companyId).data.role;
+    }
+
+    function isMember(companyId) {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+        exists(/databases/$(database)/documents/businesses/$(companyId)/users/$(request.auth.uid)) &&
+        userDoc(companyId).data.get('status', 'active') != 'disabled';
     }
 
-    function isOwner(businessId) {
-      return isMember(businessId) && role(businessId) == 'owner';
+    function isCompanyAdmin(companyId) {
+      return isMasterAdmin() ||
+        (isMember(companyId) && role(companyId) in ['owner', 'company_admin']);
     }
 
-    function isStaffOrOwner(businessId) {
-      return isMember(businessId) && role(businessId) in ['owner', 'staff'];
+    function isStaffOrOwner(companyId) {
+      return isMasterAdmin() ||
+        (isMember(companyId) && role(companyId) in ['owner', 'company_admin', 'staff']);
     }
 
-    function businessExists(businessId) {
-      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    function companyExists(companyId) {
+      return exists(/databases/$(database)/documents/businesses/$(companyId));
     }
 
-    function businessData(businessId) {
-      return get(/databases/$(database)/documents/businesses/$(businessId)).data;
+    function companyData(companyId) {
+      return get(/databases/$(database)/documents/businesses/$(companyId)).data;
     }
 
-    function ownInvite(businessId) {
-      return get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(authEmailLower()));
+    function companyActive(companyId) {
+      return isMasterAdmin() ||
+        companyData(companyId).get('status', 'active') == 'active';
     }
 
-    function hasPendingInvite(businessId) {
+    function companyNotDeleted(companyId) {
+      return isMasterAdmin() ||
+        companyData(companyId).get('status', 'active') != 'deleted';
+    }
+
+    function ownCompanyInvite(companyId) {
+      return get(/databases/$(database)/documents/businesses/$(companyId)/invites/$(authEmailLower()));
+    }
+
+    function hasPendingCompanyInvite(companyId) {
       return isSignedIn() &&
         request.auth.token.email != null &&
-        exists(/databases/$(database)/documents/businesses/$(businessId)/invites/$(authEmailLower())) &&
-        ownInvite(businessId).data.status == 'pending';
+        exists(/databases/$(database)/documents/businesses/$(companyId)/invites/$(authEmailLower())) &&
+        ownCompanyInvite(companyId).data.status == 'pending';
+    }
+
+    function globalInvitePath() {
+      return /databases/$(database)/documents/invites/$(authEmailLower());
+    }
+
+    function hasGlobalPendingInvite() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        exists(globalInvitePath()) &&
+        get(globalInvitePath()).data.status == 'pending';
+    }
+
+    function globalInviteCompany() {
+      return get(globalInvitePath()).data.companyId;
+    }
+
+    function hasPendingInviteFor(companyId) {
+      return hasPendingCompanyInvite(companyId) ||
+        (hasGlobalPendingInvite() && globalInviteCompany() == companyId);
     }
 
     function isVoidingUnchanged() {
@@ -84,80 +136,213 @@ service cloud.firestore {
     }
 
     function validInviteRole(value) {
-      return value in ['staff', 'ca'];
+      return value in ['staff', 'ca', 'company_admin'];
     }
 
     function validMemberRole(value) {
-      return value in ['owner', 'staff', 'ca'];
+      return value in ['owner', 'company_admin', 'staff', 'ca'];
+    }
+
+    function tenantFieldOk(companyId) {
+      return request.resource.data.get('companyId', companyId) == companyId;
+    }
+
+    function isDesignatedMasterEmail() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        authEmailLower() == 'imhelipatel12@gmail.com';
+    }
+
+    function canBootstrapMaster() {
+      return isSignedIn() && isDesignatedMasterEmail();
+    }
+
+    match /platform/state {
+      allow get: if isSignedIn();
+      allow create: if canBootstrapMaster() &&
+        request.resource.data.masterAdminUid == request.auth.uid;
+      allow update, delete: if isMasterAdmin() || (
+        canBootstrapMaster() &&
+        request.resource.data.masterAdminUid == request.auth.uid
+      );
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isMasterAdmin());
+      allow list: if isMasterAdmin();
+      allow create: if request.auth.uid == userId && (
+        (
+          canBootstrapMaster() &&
+          request.resource.data.role == 'master_admin' &&
+          request.resource.data.email == authEmailLower()
+        ) ||
+        (
+          isEmailVerified() &&
+          hasGlobalPendingInvite() &&
+          validMemberRole(request.resource.data.role) &&
+          request.resource.data.role == get(globalInvitePath()).data.role &&
+          request.resource.data.companyId == globalInviteCompany() &&
+          request.resource.data.email == authEmailLower()
+        ) ||
+        (
+          isEmailVerified() &&
+          request.resource.data.companyId is string &&
+          isMember(request.resource.data.companyId) &&
+          request.resource.data.email == authEmailLower() &&
+          validMemberRole(request.resource.data.role)
+        )
+      );
+      allow update: if (
+          isMasterAdmin() &&
+          request.resource.data.email == resource.data.email
+        ) ||
+        (
+          canBootstrapMaster() &&
+          request.auth.uid == userId &&
+          request.resource.data.role == 'master_admin' &&
+          request.resource.data.email == authEmailLower()
+        ) ||
+        (
+          isSignedIn() &&
+          request.auth.uid == userId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.get('companyId', null) == resource.data.get('companyId', null) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'gender', 'birthday', 'email', 'location', 'phone'])
+        );
+      allow delete: if isMasterAdmin() ||
+        (
+          resource.data.companyId is string &&
+          isCompanyAdmin(resource.data.companyId) &&
+          resource.data.role in ['staff', 'ca']
+        );
+    }
+
+    match /invites/{inviteId} {
+      allow get: if isSignedIn() && (
+        (request.auth.token.email != null && authEmailLower() == inviteId) ||
+        isMasterAdmin() ||
+        (resource.data.companyId is string && isCompanyAdmin(resource.data.companyId))
+      );
+      allow list: if isMasterAdmin();
+      allow create: if isEmailVerified() &&
+        request.resource.data.email == inviteId &&
+        inviteId == inviteId.lower() &&
+        validInviteRole(request.resource.data.role) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.companyId is string &&
+        (
+          isMasterAdmin() ||
+          (
+            isCompanyAdmin(request.resource.data.companyId) &&
+            request.resource.data.role in ['staff', 'ca'] &&
+            companyActive(request.resource.data.companyId)
+          )
+        );
+      allow delete: if isMasterAdmin() ||
+        (request.auth.token.email != null && authEmailLower() == inviteId) ||
+        (resource.data.companyId is string && isCompanyAdmin(resource.data.companyId));
+      allow update: if isMasterAdmin() ||
+        (isEmailVerified() &&
+          request.auth.token.email != null &&
+          authEmailLower() == inviteId &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'accepted' &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.companyId == resource.data.companyId &&
+          validInviteRole(resource.data.role) &&
+          request.resource.data.email == resource.data.email) ||
+        (resource.data.companyId is string && isCompanyAdmin(resource.data.companyId));
     }
 
     match /businesses/{businessId} {
-      allow get: if isMember(businessId) ||
-        (isSignedIn() && !businessExists(businessId)) ||
-        hasPendingInvite(businessId) ||
-        (isSignedIn() && resource.data.createdByUid == request.auth.uid);
-      allow list: if false;
-      // Owner may update profile fields but cannot reassign createdByUid.
-      allow update: if isOwner(businessId) &&
-        request.resource.data.createdByUid == resource.data.createdByUid;
-      allow delete: if isOwner(businessId);
-      // Bootstrap: verified email + stamp createdByUid/ownerUid.
-      allow create: if isEmailVerified() &&
-        !businessExists(businessId) &&
+      allow get: if isMasterAdmin() ||
+        (isMember(businessId) && companyNotDeleted(businessId)) ||
+        hasPendingInviteFor(businessId) ||
+        (isSignedIn() && !companyExists(businessId));
+      allow list: if isMasterAdmin();
+      allow create: if isMasterAdmin() &&
         request.resource.data.createdByUid == request.auth.uid &&
-        request.resource.data.ownerUid == request.auth.uid;
+        request.resource.data.status == 'active' &&
+        request.resource.data.name is string &&
+        request.resource.data.get('companyId', businessId) == businessId;
+      allow update: if isMasterAdmin() ||
+        (
+          isCompanyAdmin(businessId) &&
+          companyActive(businessId) &&
+          request.resource.data.createdByUid == resource.data.createdByUid &&
+          request.resource.data.get('status', 'active') == resource.data.get('status', 'active')
+        );
+      allow delete: if isMasterAdmin();
 
       match /users/{userId} {
-        allow get: if isSignedIn() && (request.auth.uid == userId || isMember(businessId));
-        allow list: if isOwner(businessId);
-        allow update: if (isOwner(businessId) &&
-            validMemberRole(request.resource.data.role)) ||
-          (isSignedIn() &&
+        allow get: if isSignedIn() && (
+          request.auth.uid == userId ||
+          isMember(businessId) ||
+          isMasterAdmin()
+        );
+        allow list: if isCompanyAdmin(businessId);
+        allow update: if (
+            isMasterAdmin() &&
+            validMemberRole(request.resource.data.role)
+          ) ||
+          (
+            isCompanyAdmin(businessId) &&
+            companyActive(businessId) &&
+            validMemberRole(request.resource.data.role) &&
+            resource.data.role in ['staff', 'ca'] &&
+            request.resource.data.role in ['staff', 'ca']
+          ) ||
+          (
+            isSignedIn() &&
             request.auth.uid == userId &&
             request.resource.data.role == resource.data.role &&
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'gender', 'birthday', 'email', 'location']));
-        allow delete: if isOwner(businessId);
-        allow create: if isOwner(businessId) ||
-          // First owner while business doc does not exist yet (batched with business create).
-          (isEmailVerified() &&
+              .hasOnly(['name', 'gender', 'birthday', 'email', 'location', 'phone', 'companyId'])
+          );
+        allow delete: if isCompanyAdmin(businessId);
+        allow create: if isMasterAdmin() ||
+          (
+            isEmailVerified() &&
             request.auth.uid == userId &&
-            !businessExists(businessId) &&
-            request.resource.data.role == 'owner' &&
-            request.resource.data.keys().hasAll(['email', 'role']) &&
-            request.resource.data.email == authEmailLower()) ||
-          // Reclaim own orphan membership only while ownerUid (or legacy
-          // createdByUid) still points at you (H6).
-          (isEmailVerified() &&
-            request.auth.uid == userId &&
-            businessExists(businessId) &&
-            businessData(businessId).createdByUid == request.auth.uid &&
-            businessData(businessId).get('ownerUid', businessData(businessId).createdByUid)
-              == request.auth.uid &&
-            request.resource.data.role == 'owner' &&
-            request.resource.data.keys().hasAll(['email', 'role']) &&
-            request.resource.data.email == authEmailLower()) ||
-          // Invite acceptance — verified mailbox + role must match invite.
-          (isEmailVerified() &&
-            request.auth.uid == userId &&
-            businessExists(businessId) &&
-            hasPendingInvite(businessId) &&
-            validInviteRole(ownInvite(businessId).data.role) &&
-            request.resource.data.role == ownInvite(businessId).data.role &&
-            request.resource.data.email == authEmailLower());
+            companyExists(businessId) &&
+            hasPendingInviteFor(businessId) &&
+            validMemberRole(request.resource.data.role) &&
+            request.resource.data.email == authEmailLower() &&
+            tenantFieldOk(businessId) &&
+            (
+              (
+                hasGlobalPendingInvite() &&
+                globalInviteCompany() == businessId &&
+                request.resource.data.role == get(globalInvitePath()).data.role
+              ) ||
+              (
+                hasPendingCompanyInvite(businessId) &&
+                request.resource.data.role == ownCompanyInvite(businessId).data.role
+              )
+            )
+          );
       }
 
       match /invites/{inviteId} {
         allow get: if isSignedIn() &&
           request.auth.token.email != null &&
           authEmailLower() == inviteId;
-        allow list: if isOwner(businessId);
-        allow create: if isOwner(businessId) &&
+        allow list: if isCompanyAdmin(businessId);
+        allow create: if (
+            isMasterAdmin() ||
+            (isCompanyAdmin(businessId) && companyActive(businessId))
+          ) &&
           validInviteRole(request.resource.data.role) &&
+          (
+            isMasterAdmin() ||
+            request.resource.data.role in ['staff', 'ca']
+          ) &&
           request.resource.data.email == inviteId &&
-          inviteId == inviteId.lower();
-        allow delete: if isOwner(businessId);
-        allow update: if isOwner(businessId) ||
+          inviteId == inviteId.lower() &&
+          request.resource.data.get('companyId', businessId) == businessId;
+        allow delete: if isCompanyAdmin(businessId);
+        allow update: if isCompanyAdmin(businessId) ||
           (isEmailVerified() &&
             request.auth.token.email != null &&
             authEmailLower() == inviteId &&
@@ -169,93 +354,101 @@ service cloud.firestore {
       }
 
       match /veparis/{vepariId} {
-        allow read: if isMember(businessId);
-        allow write: if isOwner(businessId);
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create, update: if isCompanyAdmin(businessId) && companyActive(businessId) &&
+          tenantFieldOk(businessId);
+        allow delete: if isCompanyAdmin(businessId) && companyActive(businessId);
       }
 
       match /bills/{billId} {
-        allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId) &&
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           isNonNegNumber(request.resource.data.totalAmount) &&
           request.resource.data.date is string &&
           request.resource.data.items is list &&
           request.resource.data.keys().hasAll(['date', 'totalAmount', 'items']) &&
-          request.resource.data.get('isVoided', false) == false;
-        allow update: if isStaffOrOwner(businessId) &&
-          (isVoidingUnchanged() || isOwner(businessId)) &&
+          request.resource.data.get('isVoided', false) == false &&
+          tenantFieldOk(businessId);
+        allow update: if isStaffOrOwner(businessId) && companyActive(businessId) &&
+          (isVoidingUnchanged() || isCompanyAdmin(businessId)) &&
           isNonNegNumber(request.resource.data.totalAmount) &&
           request.resource.data.date is string &&
           request.resource.data.items is list &&
-          // નોંધ નં. / દાખલા નં. never change on staff updates; owner may change manually.
+          tenantFieldOk(businessId) &&
           (
             !('entryNumber' in resource.data) ||
             resource.data.entryNumber == null ||
             request.resource.data.entryNumber == resource.data.entryNumber ||
-            isOwner(businessId)
+            isCompanyAdmin(businessId)
           ) &&
           (
             !('dakhlaNumber' in resource.data) ||
             resource.data.dakhlaNumber == null ||
             request.resource.data.dakhlaNumber == resource.data.dakhlaNumber ||
-            isOwner(businessId)
+            isCompanyAdmin(businessId)
           );
         allow delete: if false;
       }
 
       match /payments/{paymentId} {
-        allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId) &&
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId is string &&
           request.resource.data.date is string &&
-          request.resource.data.get('isVoided', false) == false;
-        // billId is immutable after create (H7) — prevents re-pointing money.
-        allow update: if isStaffOrOwner(businessId) &&
-          (isVoidingUnchanged() || isOwner(businessId)) &&
+          request.resource.data.get('isVoided', false) == false &&
+          tenantFieldOk(businessId);
+        allow update: if isStaffOrOwner(businessId) && companyActive(businessId) &&
+          (isVoidingUnchanged() || isCompanyAdmin(businessId)) &&
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
-          request.resource.data.date is string;
+          request.resource.data.date is string &&
+          tenantFieldOk(businessId);
         allow delete: if false;
       }
 
-      // Vepari settlement — same shape/rules as farmer payments (Rojmer).
       match /vepariPayments/{paymentId} {
-        allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId) &&
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId is string &&
           request.resource.data.date is string &&
-          request.resource.data.get('isVoided', false) == false;
-        allow update: if isStaffOrOwner(businessId) &&
-          (isVoidingUnchanged() || isOwner(businessId)) &&
+          request.resource.data.get('isVoided', false) == false &&
+          tenantFieldOk(businessId);
+        allow update: if isStaffOrOwner(businessId) && companyActive(businessId) &&
+          (isVoidingUnchanged() || isCompanyAdmin(businessId)) &&
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.billId == resource.data.billId &&
-          request.resource.data.date is string;
+          request.resource.data.date is string &&
+          tenantFieldOk(businessId);
         allow delete: if false;
       }
 
       match /counters/{counterId} {
-        allow read: if isMember(businessId);
-        allow create, update: if isStaffOrOwner(businessId) &&
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create, update: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           counterId in ['entryNumber', 'dakhlaNumber'] &&
           request.resource.data.keys().hasAll(['next']) &&
-          isPositiveNumber(request.resource.data.next);
+          isPositiveNumber(request.resource.data.next) &&
+          tenantFieldOk(businessId);
         allow delete: if false;
       }
 
       match /silakEntries/{entryId} {
-        allow read: if isMember(businessId);
-        allow create: if isStaffOrOwner(businessId) &&
+        allow read: if (isMember(businessId) && companyNotDeleted(businessId)) || isMasterAdmin();
+        allow create: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           request.resource.data.isManual == true &&
           isPositiveNumber(request.resource.data.amount) &&
           request.resource.data.side in ['jama', 'udhar'] &&
-          request.resource.data.date is string;
-        allow update: if isStaffOrOwner(businessId) &&
+          request.resource.data.date is string &&
+          tenantFieldOk(businessId);
+        allow update: if isStaffOrOwner(businessId) && companyActive(businessId) &&
           resource.data.isManual == true &&
           request.resource.data.isManual == true &&
           isPositiveNumber(request.resource.data.amount) &&
-          request.resource.data.side in ['jama', 'udhar'];
-        allow delete: if isOwner(businessId) &&
+          request.resource.data.side in ['jama', 'udhar'] &&
+          tenantFieldOk(businessId);
+        allow delete: if isCompanyAdmin(businessId) &&
           resource.data.isManual == true;
       }
     }

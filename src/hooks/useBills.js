@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { allocateEntryNumberRemote, reclaimEntryNumberCounter, allocateDakhlaNumberRemote, reclaimDakhlaNumberCounter, billCollectionRef, billDocRef, paymentDocRef, vepariPaymentDocRef } from '../firebase/firestore'
+import { allocateEntryNumberRemote, reclaimEntryNumberCounter, allocateDakhlaNumberRemote, reclaimDakhlaNumberCounter, billCollectionRef, billDocRef, paymentDocRef, vepariPaymentDocRef, stampCompany } from '../firebase/firestore'
 import { useAuth } from './useAuth'
 import { computeBillTotal } from '../utils/calc'
 import { diffFields } from '../utils/editHistory'
@@ -303,7 +303,7 @@ export function useBills() {
         throw new Error('DAKHLA_NUMBER_TAKEN')
       }
       const createdAtLocal = Date.now()
-      const payload = {
+      const payload = stampCompany({
         farmerName: farmerName.trim(),
         farmerVillage: farmerVillage.trim(),
         vepariId,
@@ -316,7 +316,7 @@ export function useBills() {
         entryNumber,
         dakhlaNumber,
         editHistory: [],
-      }
+      })
       const ref = doc(billCollectionRef())
       const localId = await localDb.bills.add({
         ...payload,

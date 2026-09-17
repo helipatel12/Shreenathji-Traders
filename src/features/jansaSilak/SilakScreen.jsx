@@ -385,6 +385,12 @@ function DayView({ mode, setMode }) {
                 {formatCurrency(day.shesTolaiTotal)}
               </p>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-body text-ink-muted">{t('silak.pendingRojmerLabel')}</p>
+              <p className="font-numeric text-body text-ink font-semibold">
+                {formatCurrency(day.pendingTotal || 0)}
+              </p>
+            </div>
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">
               <p className="text-body text-ink font-semibold">{t('silak.closingLabel')}</p>
               <p className="font-numeric text-heading text-ink font-semibold">
@@ -596,6 +602,12 @@ function RangeView({ mode }) {
                 <p className="text-body text-ink-muted">{t('silak.shesTolaiTotalLabel')}</p>
                 <p className="font-numeric text-body text-ink font-semibold">
                   {formatCurrency(rangeFees.shesTolaiTotal)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-body text-ink-muted">{t('silak.pendingRojmerLabel')}</p>
+                <p className="font-numeric text-body text-ink font-semibold">
+                  {formatCurrency(rangeFees.pendingTotal || 0)}
                 </p>
               </div>
               <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/60">

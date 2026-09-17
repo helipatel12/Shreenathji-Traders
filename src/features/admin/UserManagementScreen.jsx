@@ -9,6 +9,7 @@ import InviteForm from '../settings/InviteForm'
 import DataTable from '../../components/DataTable'
 import TableToolbar from '../../components/TableToolbar'
 import { SkeletonTable } from '../../components/Skeleton'
+import { isCompanyAdminRole } from '../../utils/roles'
 
 function DeleteUserDialog({ userLabel, busy, error, onConfirm, onCancel }) {
   const { t } = useLocale()
@@ -92,14 +93,18 @@ export default function UserManagementScreen() {
 
   const pendingInvites = invites.filter((i) => i.status === 'pending')
   const ownerCount = useMemo(
-    () => users.filter((u) => u.role === 'owner').length,
+    () => users.filter((u) => isCompanyAdminRole(u.role)).length,
     [users],
   )
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter((u) => {
-      if (roleFilter && u.role !== roleFilter) return false
+      if (roleFilter) {
+        if (roleFilter === 'company_admin') {
+          if (!isCompanyAdminRole(u.role)) return false
+        } else if (u.role !== roleFilter) return false
+      }
       if (!q) return true
       return (
         String(u.name || '').toLowerCase().includes(q) ||
@@ -119,13 +124,13 @@ export default function UserManagementScreen() {
   function canDeleteUser(u) {
     if (!u) return false
     if (u.id === user?.id) return false
-    if (u.role === 'owner' && ownerCount <= 1) return false
+    if (isCompanyAdminRole(u.role) && ownerCount <= 1) return false
     return true
   }
 
   function deleteBlockedReason(u) {
     if (u.id === user?.id) return t('admin.cannotDeleteSelf')
-    if (u.role === 'owner' && ownerCount <= 1) return t('admin.cannotDeleteLastOwner')
+    if (isCompanyAdminRole(u.role) && ownerCount <= 1) return t('admin.cannotDeleteLastOwner')
     return ''
   }
 
@@ -138,7 +143,7 @@ export default function UserManagementScreen() {
     setDeleteBusy(true)
     setDeleteError('')
     try {
-      await deleteUser(deletingUser.id, { email: deletingUser.email })
+      await deleteUser(deletingUser.id, { email: deletingUser.email, role: deletingUser.role })
       setSelectedId((id) => (id === deletingUser.id ? null : id))
       setDeletingUser(null)
     } catch (err) {
@@ -183,7 +188,7 @@ export default function UserManagementScreen() {
         onChange: setRoleFilter,
         allLabel: t('admin.allRoles'),
         options: [
-          { value: 'owner', label: t('roles.owner') },
+          { value: 'company_admin', label: t('roles.company_admin') },
           { value: 'staff', label: t('roles.staff') },
           { value: 'ca', label: t('roles.ca') },
         ],
@@ -191,10 +196,10 @@ export default function UserManagementScreen() {
       render: (u) => (
         <span
           className={`badge ${
-            u.role === 'owner' ? 'badge-blue' : u.role === 'staff' ? 'badge-green' : 'badge-gray'
+            isCompanyAdminRole(u.role) ? 'badge-blue' : u.role === 'staff' ? 'badge-green' : 'badge-gray'
           }`}
         >
-          {t(`roles.${u.role}`)}
+          {t(`roles.${u.role === 'owner' ? 'company_admin' : u.role}`)}
         </span>
       ),
     },
@@ -276,12 +281,14 @@ export default function UserManagementScreen() {
                   <div>
                     <label className="block text-caption text-ink-muted mb-1">{t('admin.role')}</label>
                     <select
-                      value={u.role}
-                      disabled={u.id === user?.id}
+                      value={isCompanyAdminRole(u.role) ? 'company_admin' : u.role}
+                      disabled={u.id === user?.id || isCompanyAdminRole(u.role)}
                       onChange={(e) => updateUser(u.id, { role: e.target.value })}
                       className="min-h-11 rounded-xl border border-border px-3 bg-surface"
                     >
-                      <option value="owner">{t('roles.owner')}</option>
+                      {isCompanyAdminRole(u.role) && (
+                        <option value="company_admin">{t('roles.company_admin')}</option>
+                      )}
                       <option value="staff">{t('roles.staff')}</option>
                       <option value="ca">{t('roles.ca')}</option>
                     </select>

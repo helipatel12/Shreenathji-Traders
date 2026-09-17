@@ -1,115 +1,146 @@
-// Typed collection helpers for the Firestore data model in
-// architecture.md §4. Implemented incrementally as each phase needs
-// its collection(s) — see phases.md. Phase 1 adds the business/user
-// helpers needed for login; later phases add bills/payments/etc.
+// Firestore helpers — multi-tenant companies (stored as `businesses/{id}`
+// so the live Shreenathji Traders documents keep working).
 
-import { collection, doc, getDoc, runTransaction, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import { db } from './config'
+import { getActiveCompanyId, requireCompanyId } from './tenant'
+import { COMPANY_STATUSES, ROLES, isCompanyAdminRole } from '../utils/roles'
 
-// This app is single-business per deployment — prd.md and
-// architecture.md describe one aadatiya's business per install, not a
-// multi-tenant product. businessId is therefore a fixed deployment
-// constant (set via VITE_BUSINESS_ID), not something chosen at
-// runtime or discovered from the URL. Flagged in memory.md's
-// decisions log — see there if this assumption ever needs revisiting.
-export const BUSINESS_ID = import.meta.env.VITE_BUSINESS_ID || 'shreenath-traders'
+export const COMPANIES_COLLECTION = 'businesses'
+export const PLATFORM_USERS_COLLECTION = 'users'
+export const GLOBAL_INVITES_COLLECTION = 'invites'
 
-export function businessRef() {
-  return doc(db, 'businesses', BUSINESS_ID)
+/** Existing production tenant — local Dexie name + login lift still use this id. */
+export const LEGACY_COMPANY_ID = import.meta.env.VITE_BUSINESS_ID || 'shreenath-traders'
+export const BUSINESS_ID = LEGACY_COMPANY_ID
+
+/** Permanent Master Admin login. Env can override; password stays in Firebase Auth only. */
+export const MASTER_ADMIN_EMAIL = String(
+  import.meta.env.VITE_MASTER_ADMIN_EMAIL || 'imhelipatel12@gmail.com',
+)
+  .trim()
+  .toLowerCase()
+
+export function isDesignatedMasterEmail(email) {
+  return String(email || '').trim().toLowerCase() === MASTER_ADMIN_EMAIL
 }
 
-export function userRef(uid) {
-  return doc(db, 'businesses', BUSINESS_ID, 'users', uid)
+function cid(companyId) {
+  return requireCompanyId(companyId)
 }
 
-// Full user list (Phase 8 — Settings → users) — owner-only per
-// firestore.rules (isMember can read a single user, but listing the
-// whole team is scoped tighter, see rules.md §6).
-export function userCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'users')
+export function stampCompany(data, companyId) {
+  const id = cid(companyId)
+  return { ...data, companyId: id }
 }
 
-// Staff/CA invites (Phase 8) — architecture.md has no Admin SDK/Cloud
-// Functions (rules.md §2), so there's no way for the owner to create
-// someone else's Firebase Auth account directly. Instead: the owner
-// pre-authorizes an EMAIL with a role/location here; the invited
-// person creates their own account (email + password, same as the
-// bootstrap flow) and getOrCreateUserOnFirstLogin() below promotes
-// them using this record. The doc ID is always the invitee's
-// lowercased email — not an auto ID — specifically so firestore.rules
-// can let a not-yet-a-member user check "was I invited?" via a
-// targeted `get` on their own doc ID, without needing `list` access
-// to every pending invite (which would leak who else is invited).
-export function inviteCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'invites')
+export function platformStateRef() {
+  return doc(db, 'platform', 'state')
 }
 
-export function inviteDocRef(email) {
-  return doc(db, 'businesses', BUSINESS_ID, 'invites', email.trim().toLowerCase())
+export function platformUserRef(uid) {
+  return doc(db, PLATFORM_USERS_COLLECTION, uid)
 }
 
-// Vepari master list (Phase 3) — architecture.md §4:
-// businesses/{businessId}/veparis/{vepariId}
-export function vepariCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'veparis')
+export function platformUsersCollectionRef() {
+  return collection(db, PLATFORM_USERS_COLLECTION)
 }
 
-export function vepariDocRef(vepariId) {
-  return doc(db, 'businesses', BUSINESS_ID, 'veparis', vepariId)
+export function globalInviteRef(email) {
+  return doc(db, GLOBAL_INVITES_COLLECTION, String(email || '').trim().toLowerCase())
 }
 
-// Bills (Phase 4) — architecture.md §4: businesses/{businessId}/bills/{billId}
-export function billCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'bills')
+export function companiesCollectionRef() {
+  return collection(db, COMPANIES_COLLECTION)
 }
 
-export function billDocRef(billId) {
-  return doc(db, 'businesses', BUSINESS_ID, 'bills', billId)
+export function companyRef(companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId))
 }
 
-// Payments (Phase 6) — architecture.md §4:
-// businesses/{businessId}/payments/{paymentId}
-export function paymentCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'payments')
+export function businessRef(companyId) {
+  return companyRef(companyId)
 }
 
-export function paymentDocRef(paymentId) {
-  return doc(db, 'businesses', BUSINESS_ID, 'payments', paymentId)
+export function userRef(uid, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'users', uid)
 }
 
-// Vepari settlement payments — mirror of farmer payments / Rojmer:
-// businesses/{businessId}/vepariPayments/{paymentId}
-export function vepariPaymentCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'vepariPayments')
+export function userCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'users')
 }
 
-export function vepariPaymentDocRef(paymentId) {
-  return doc(db, 'businesses', BUSINESS_ID, 'vepariPayments', paymentId)
+export function inviteCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'invites')
 }
 
-// Manual silak entries only (Phase 7) — architecture.md §4:
-// businesses/{businessId}/silakEntries/{entryId}. Auto (bill/payment
-// -derived) entries are never stored here — see useJansaSilak.js.
-export function silakEntryCollectionRef() {
-  return collection(db, 'businesses', BUSINESS_ID, 'silakEntries')
+export function inviteDocRef(email, companyId) {
+  return doc(
+    db,
+    COMPANIES_COLLECTION,
+    cid(companyId),
+    'invites',
+    String(email || '').trim().toLowerCase(),
+  )
 }
 
-export function silakEntryDocRef(entryId) {
-  return doc(db, 'businesses', BUSINESS_ID, 'silakEntries', entryId)
+export function vepariCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'veparis')
 }
 
-export function entryNumberCounterRef() {
-  return doc(db, 'businesses', BUSINESS_ID, 'counters', 'entryNumber')
+export function vepariDocRef(vepariId, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'veparis', vepariId)
 }
 
-export function dakhlaNumberCounterRef() {
-  return doc(db, 'businesses', BUSINESS_ID, 'counters', 'dakhlaNumber')
+export function billCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'bills')
 }
 
-/**
- * Atomically allocate the next નોંધ નં. when online.
- * @param {number} [minNext=1] — never allocate below this (usually max local + 1)
- */
+export function billDocRef(billId, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'bills', billId)
+}
+
+export function paymentCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'payments')
+}
+
+export function paymentDocRef(paymentId, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'payments', paymentId)
+}
+
+export function vepariPaymentCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'vepariPayments')
+}
+
+export function vepariPaymentDocRef(paymentId, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'vepariPayments', paymentId)
+}
+
+export function silakEntryCollectionRef(companyId) {
+  return collection(db, COMPANIES_COLLECTION, cid(companyId), 'silakEntries')
+}
+
+export function silakEntryDocRef(entryId, companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'silakEntries', entryId)
+}
+
+export function entryNumberCounterRef(companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'counters', 'entryNumber')
+}
+
+export function dakhlaNumberCounterRef(companyId) {
+  return doc(db, COMPANIES_COLLECTION, cid(companyId), 'counters', 'dakhlaNumber')
+}
+
 export async function allocateEntryNumberRemote(minNext = 1) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return null
   const floor = Math.max(1, Number(minNext) || 1)
@@ -119,7 +150,7 @@ export async function allocateEntryNumberRemote(minNext = 1) {
       const snap = await transaction.get(ref)
       const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
       const next = Math.max(stored, floor)
-      transaction.set(ref, { next: next + 1 }, { merge: true })
+      transaction.set(ref, stampCompany({ next: next + 1 }), { merge: true })
       return next
     })
   } catch (err) {
@@ -128,10 +159,6 @@ export async function allocateEntryNumberRemote(minNext = 1) {
   }
 }
 
-/**
- * If the cloud counter drifted ahead of live bills (deletes / failed creates),
- * snap it back to `floor` (max active + 1) so the next note is continuous.
- */
 export async function reclaimEntryNumberCounter(floor) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return
   const nextFloor = Math.max(1, Number(floor) || 1)
@@ -141,7 +168,7 @@ export async function reclaimEntryNumberCounter(floor) {
       const snap = await transaction.get(ref)
       const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
       if (stored > nextFloor) {
-        transaction.set(ref, { next: nextFloor }, { merge: true })
+        transaction.set(ref, stampCompany({ next: nextFloor }), { merge: true })
       }
     })
   } catch (err) {
@@ -149,9 +176,6 @@ export async function reclaimEntryNumberCounter(floor) {
   }
 }
 
-/**
- * Atomically allocate the next દાખલા નં. when online.
- */
 export async function allocateDakhlaNumberRemote(minNext = 1) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return null
   const floor = Math.max(1, Number(minNext) || 1)
@@ -161,7 +185,7 @@ export async function allocateDakhlaNumberRemote(minNext = 1) {
       const snap = await transaction.get(ref)
       const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
       const next = Math.max(stored, floor)
-      transaction.set(ref, { next: next + 1 }, { merge: true })
+      transaction.set(ref, stampCompany({ next: next + 1 }), { merge: true })
       return next
     })
   } catch (err) {
@@ -170,7 +194,6 @@ export async function allocateDakhlaNumberRemote(minNext = 1) {
   }
 }
 
-/** Snap dakhla counter back when it drifted ahead of live day-groups. */
 export async function reclaimDakhlaNumberCounter(floor) {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return
   const nextFloor = Math.max(1, Number(floor) || 1)
@@ -180,7 +203,7 @@ export async function reclaimDakhlaNumberCounter(floor) {
       const snap = await transaction.get(ref)
       const stored = snap.exists() ? Number(snap.data().next) || 1 : 1
       if (stored > nextFloor) {
-        transaction.set(ref, { next: nextFloor }, { merge: true })
+        transaction.set(ref, stampCompany({ next: nextFloor }), { merge: true })
       }
     })
   } catch (err) {
@@ -188,68 +211,522 @@ export async function reclaimDakhlaNumberCounter(floor) {
   }
 }
 
-export async function getBusiness() {
-  const snap = await getDoc(businessRef())
+export async function getCompany(companyId) {
+  const snap = await getDoc(companyRef(companyId))
   return snap.exists() ? { id: snap.id, ...snap.data() } : null
 }
 
-export async function getUserRecord(uid) {
-  const snap = await getDoc(userRef(uid))
+export async function getBusiness(companyId) {
+  return getCompany(companyId)
+}
+
+export async function getPlatformUser(uid) {
+  const snap = await getDoc(platformUserRef(uid))
   return snap.exists() ? { id: snap.id, ...snap.data() } : null
 }
 
-// Phase 1's "first login" flow (phases.md), extended in Phase 8 for
-// staff/CA provisioning:
-//
-// - If a user record already exists for this uid, just return it.
-// - If the business itself has never been set up, this is the very
-//   first person to ever sign in to this deployment — they become the
-//   owner, and the business doc is created alongside their user
-//   record in a single batch (architecture.md §4's businesses/{id}
-//   and businesses/{id}/users/{uid}).
-// - If the business already exists but this uid has no user record,
-//   check for a pending invite at invites/{their email}. If the owner
-//   invited this exact email (Settings → Users, Phase 8), promote
-//   them to a real user record with the invited role/location, and
-//   mark the invite accepted. This is the ONLY way to get staff/ca
-//   access — there's no Admin SDK to let the owner create someone
-//   else's Firebase Auth account directly (rules.md §2), so the
-//   invited person creates their own account and this function
-//   "claims" it against the pre-authorization the owner set up.
-// - If neither — this is genuinely uninvited. Auto-granting access to
-//   any email that happens to sign up would be a real security hole
-//   for a money app (rules.md §3, §6). The caller gets status:
-//   'unauthorized' and should sign the user back out with a clear
-//   explanation.
-//
-// Identifier note: originally keyed on phone number (Firebase phone
-// auth) — switched to email since Firebase now requires the Blaze
-// (paid) plan for phone/SMS auth, which conflicts with prd.md §5's
-// free-tier requirement. See memory.md decisions log.
-export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone = '', emailVerified = false }) {
+export async function getCompanyUser(uid, companyId) {
+  const snap = await getDoc(userRef(uid, companyId))
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null
+}
+
+export async function getUserRecord(uid, companyId = getActiveCompanyId()) {
+  if (companyId) {
+    const member = await getCompanyUser(uid, companyId)
+    if (member) return member
+  }
+  return getPlatformUser(uid)
+}
+
+export async function getPlatformState() {
+  const snap = await getDoc(platformStateRef())
+  return snap.exists() ? snap.data() : null
+}
+
+export function slugifyCompanyId(name) {
+  const ascii = String(name || '')
+    .normalize('NFKD')
+    .replace(/[^\u0000-\u007F]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  return ascii || 'company'
+}
+
+function randomSuffix() {
+  return Math.random().toString(36).slice(2, 6)
+}
+
+export async function allocateCompanyId(name) {
+  const base = slugifyCompanyId(name)
+  let id = base
+  for (let i = 0; i < 8; i += 1) {
+    const snap = await getDoc(doc(db, COMPANIES_COLLECTION, id))
+    if (!snap.exists()) return id
+    id = `${base}-${randomSuffix()}`
+  }
+  return `${base}-${Date.now().toString(36).slice(-4)}`
+}
+
+function invitePayload({ email, companyId, role, name = '', location = '', invitedBy }) {
+  return {
+    email: String(email || '').trim().toLowerCase(),
+    companyId,
+    role,
+    name: String(name || '').trim(),
+    location: String(location || '').trim(),
+    status: 'pending',
+    invitedBy: invitedBy || '',
+    invitedAt: serverTimestamp(),
+  }
+}
+
+export async function createCompany({ name, adminEmail, adminName = '', createdByUid }) {
+  const trimmedName = String(name || '').trim()
+  const email = String(adminEmail || '').trim().toLowerCase()
+  if (!trimmedName) throw new Error('COMPANY_NAME_REQUIRED')
+  if (!email) throw new Error('ADMIN_EMAIL_REQUIRED')
+
+  const existingInvite = await getDoc(globalInviteRef(email))
+  if (existingInvite.exists() && existingInvite.data().status === 'pending') {
+    const err = new Error('INVITE_EMAIL_BUSY')
+    err.code = 'INVITE_EMAIL_BUSY'
+    throw err
+  }
+
+  const id = await allocateCompanyId(trimmedName)
+  const invite = invitePayload({
+    email,
+    companyId: id,
+    role: ROLES.COMPANY_ADMIN,
+    name: adminName,
+    invitedBy: createdByUid,
+  })
+  const batch = writeBatch(db)
+  batch.set(doc(db, COMPANIES_COLLECTION, id), {
+    name: trimmedName,
+    companyId: id,
+    status: COMPANY_STATUSES.ACTIVE,
+    financialYearStart: '04-01',
+    createdByUid,
+    ownerUid: null,
+    adminUid: null,
+    adminEmail: email,
+    createdAt: serverTimestamp(),
+  })
+  batch.set(globalInviteRef(email), invite)
+  batch.set(inviteDocRef(email, id), invite)
+  await batch.commit()
+  return id
+}
+
+export async function updateCompany(companyId, changes) {
+  await updateDoc(companyRef(companyId), changes)
+}
+
+export async function setCompanyStatus(companyId, status) {
+  const patch = { status }
+  if (status === COMPANY_STATUSES.SUSPENDED) patch.suspendedAt = serverTimestamp()
+  if (status === COMPANY_STATUSES.DELETED) patch.deletedAt = serverTimestamp()
+  if (status === COMPANY_STATUSES.ACTIVE) {
+    patch.suspendedAt = null
+    patch.deletedAt = null
+  }
+  await updateDoc(companyRef(companyId), patch)
+}
+
+export async function inviteCompanyAdmin({ companyId, email, name = '', invitedBy }) {
+  const id = cid(companyId)
+  const invite = invitePayload({
+    email,
+    companyId: id,
+    role: ROLES.COMPANY_ADMIN,
+    name,
+    invitedBy,
+  })
+  const existing = await getDoc(globalInviteRef(invite.email))
+  if (
+    existing.exists() &&
+    existing.data().status === 'pending' &&
+    existing.data().companyId !== id
+  ) {
+    const err = new Error('INVITE_EMAIL_BUSY')
+    err.code = 'INVITE_EMAIL_BUSY'
+    throw err
+  }
+  const batch = writeBatch(db)
+  batch.set(globalInviteRef(invite.email), invite)
+  batch.set(inviteDocRef(invite.email, id), invite)
+  batch.set(companyRef(id), { adminEmail: invite.email }, { merge: true })
+  await batch.commit()
+}
+
+function memberRoleFromInvite(role) {
+  if (isCompanyAdminRole(role) || role === ROLES.COMPANY_ADMIN) return ROLES.COMPANY_ADMIN
+  if (role === ROLES.CA) return ROLES.CA
+  return ROLES.STAFF
+}
+
+function platformRoleFromCompanyRole(role) {
+  if (isCompanyAdminRole(role)) return ROLES.COMPANY_ADMIN
+  if (role === ROLES.CA) return ROLES.CA
+  if (role === ROLES.MASTER_ADMIN) return ROLES.MASTER_ADMIN
+  return ROLES.STAFF
+}
+
+async function acceptPendingInvite({
+  uid,
+  email,
+  name,
+  phone,
+  invite,
+  inviteCompanyId,
+}) {
+  const companyId = invite.companyId || inviteCompanyId
+  const memberRole = memberRoleFromInvite(invite.role)
+  const platformRole = memberRole
+  const displayName = String(name || invite.name || '').trim()
+  const newMember = {
+    email,
+    phone: phone || '',
+    role: memberRole,
+    name: displayName,
+    location: invite.location || '',
+    companyId,
+    status: 'active',
+    createdAt: serverTimestamp(),
+  }
+  const newPlatform = {
+    email,
+    phone: phone || '',
+    role: platformRole,
+    name: displayName,
+    location: invite.location || '',
+    companyId,
+    status: 'active',
+    createdAt: serverTimestamp(),
+  }
+  const batch = writeBatch(db)
+  batch.set(platformUserRef(uid), newPlatform)
+  batch.set(userRef(uid, companyId), newMember)
+  const acceptedPatch = {
+    status: 'accepted',
+    acceptedAt: serverTimestamp(),
+    acceptedByUid: uid,
+  }
+  try {
+    const globalSnap = await getDoc(globalInviteRef(email))
+    if (globalSnap.exists()) {
+      batch.update(globalInviteRef(email), acceptedPatch)
+    }
+  } catch {
+    /* invitee can only get their own global invite */
+  }
+  batch.set(inviteDocRef(email, companyId), acceptedPatch, { merge: true })
+  if (isCompanyAdminRole(memberRole)) {
+    batch.set(
+      companyRef(companyId),
+      { adminUid: uid, ownerUid: uid, adminEmail: email, status: COMPANY_STATUSES.ACTIVE },
+      { merge: true },
+    )
+  }
+  await batch.commit()
+  const company = await getCompany(companyId)
+  return {
+    platformUser: { id: uid, ...newPlatform },
+    companyUser: { id: uid, ...newMember },
+    company,
+  }
+}
+
+async function liftLegacyMembership({ uid, email, name, phone, legacyUser, companyId }) {
+  const displayName = String(name || legacyUser.name || '').trim()
+  const platformRole = platformRoleFromCompanyRole(legacyUser.role)
+  const platformUser = {
+    email: email || String(legacyUser.email || '').toLowerCase(),
+    phone: phone || legacyUser.phone || '',
+    role: platformRole,
+    name: displayName,
+    location: legacyUser.location || '',
+    companyId,
+    status: 'active',
+    createdAt: serverTimestamp(),
+  }
+  await setDoc(platformUserRef(uid), platformUser)
+  try {
+    await setDoc(
+      companyRef(companyId),
+      {
+        companyId,
+        status: COMPANY_STATUSES.ACTIVE,
+      },
+      { merge: true },
+    )
+  } catch {
+    /* membership may be enough; master can stamp later */
+  }
+  const company = await getCompany(companyId)
+  return {
+    platformUser: { id: uid, ...platformUser },
+    companyUser: { id: uid, ...legacyUser },
+    company,
+  }
+}
+
+async function bootstrapMasterAdmin({ uid, email, name, phone }) {
+  const platformUser = {
+    email,
+    phone: phone || '',
+    role: ROLES.MASTER_ADMIN,
+    name: String(name || '').trim(),
+    location: '',
+    companyId: null,
+    status: 'active',
+    createdAt: serverTimestamp(),
+  }
+  const batch = writeBatch(db)
+  batch.set(
+    platformStateRef(),
+    {
+      masterAdminUid: uid,
+      masterAdminEmail: email,
+      bootstrappedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+  batch.set(platformUserRef(uid), platformUser, { merge: true })
+  await batch.commit()
+  try {
+    const legacy = await getDoc(doc(db, COMPANIES_COLLECTION, LEGACY_COMPANY_ID))
+    if (legacy.exists()) {
+      await setDoc(
+        companyRef(LEGACY_COMPANY_ID),
+        {
+          companyId: LEGACY_COMPANY_ID,
+          status: COMPANY_STATUSES.ACTIVE,
+        },
+        { merge: true },
+      )
+    }
+  } catch {
+    /* ignore — company stamp is best-effort */
+  }
+  return { platformUser: { id: uid, ...platformUser }, company: null, companyUser: null }
+}
+
+function sessionFromParts({ platformUser, companyUser, company }) {
+  if (platformUser?.status === 'disabled') {
+    return { status: 'unauthorized', reason: 'disabled', user: null }
+  }
+  if (platformUser?.role === ROLES.MASTER_ADMIN) {
+    return {
+      status: 'ok',
+      user: platformUser,
+      platformUser,
+      companyUser: null,
+      company: null,
+    }
+  }
+  if (!company || company.status === COMPANY_STATUSES.DELETED) {
+    return { status: 'unauthorized', reason: 'company-gone', user: null }
+  }
+  if (company.status === COMPANY_STATUSES.SUSPENDED) {
+    return {
+      status: 'suspended',
+      user: companyUser || platformUser,
+      platformUser,
+      companyUser,
+      company,
+    }
+  }
+  return {
+    status: 'ok',
+    user: companyUser || platformUser,
+    platformUser,
+    companyUser,
+    company,
+  }
+}
+
+async function tryBootstrapMasterAdmin(args) {
+  try {
+    return await bootstrapMasterAdmin(args)
+  } catch (err) {
+    console.warn('Master Admin bootstrap failed:', err)
+    return null
+  }
+}
+
+async function readLegacyCompanyUser(uid) {
+  try {
+    const snap = await getDoc(doc(db, COMPANIES_COLLECTION, LEGACY_COMPANY_ID, 'users', uid))
+    return snap.exists() ? { id: uid, ...snap.data() } : null
+  } catch (err) {
+    if (err?.code === 'permission-denied') return null
+    throw err
+  }
+}
+
+async function sessionFromLegacyMember({ uid, email, name, phone, legacyUser }) {
+  try {
+    const lifted = await liftLegacyMembership({
+      uid,
+      email,
+      name,
+      phone,
+      legacyUser,
+      companyId: LEGACY_COMPANY_ID,
+    })
+    return sessionFromParts(lifted)
+  } catch (err) {
+    console.warn('Platform user lift failed — opening existing company books:', err)
+  }
+  let company = null
+  try {
+    company = await getCompany(LEGACY_COMPANY_ID)
+  } catch {
+    company = {
+      id: LEGACY_COMPANY_ID,
+      name: 'Shreenathji Traders',
+      status: COMPANY_STATUSES.ACTIVE,
+    }
+  }
+  if (!company) {
+    company = {
+      id: LEGACY_COMPANY_ID,
+      name: 'Shreenathji Traders',
+      status: COMPANY_STATUSES.ACTIVE,
+    }
+  }
+  const platformUser = {
+    id: uid,
+    email,
+    phone: phone || legacyUser.phone || '',
+    role: platformRoleFromCompanyRole(legacyUser.role),
+    name: String(name || legacyUser.name || '').trim(),
+    location: legacyUser.location || '',
+    companyId: LEGACY_COMPANY_ID,
+    status: 'active',
+  }
+  return sessionFromParts({
+    platformUser,
+    companyUser: { id: uid, ...legacyUser },
+    company,
+  })
+}
+
+/**
+ * Resolve platform identity + company membership after Firebase Auth.
+ * Existing company members must always be able to open their books, even
+ * if the new multi-tenant collections are not writable yet.
+ */
+export async function getOrCreateUserOnFirstLogin({
+  uid,
+  email,
+  name = '',
+  phone = '',
+  emailVerified = false,
+}) {
   const displayName = String(name || '').trim()
   const normalizedEmail = String(email || '').trim().toLowerCase()
-  const existingUser = await getUserRecord(uid)
-  if (existingUser) {
-    if (existingUser.role === 'owner') {
+  const designatedMaster = isDesignatedMasterEmail(normalizedEmail)
+
+  let existingPlatform = null
+  try {
+    existingPlatform = await getPlatformUser(uid)
+  } catch (err) {
+    if (err?.code !== 'permission-denied') throw err
+  }
+
+  if (designatedMaster) {
+    const boot = await tryBootstrapMasterAdmin({
+      uid,
+      email: normalizedEmail,
+      name: displayName || existingPlatform?.name || '',
+      phone,
+    })
+    if (boot) return sessionFromParts(boot)
+    if (existingPlatform?.role === ROLES.MASTER_ADMIN) {
+      return sessionFromParts({ platformUser: existingPlatform })
+    }
+    return { user: null, status: 'unauthorized', reason: 'master-bootstrap-blocked' }
+  }
+
+  if (existingPlatform) {
+    if (displayName && displayName !== existingPlatform.name) {
       try {
-        const business = await getBusiness()
-        if (business && !business.ownerUid) {
-          await setDoc(businessRef(), { ownerUid: uid }, { merge: true })
-        }
+        await setDoc(platformUserRef(uid), { name: displayName }, { merge: true })
+        existingPlatform.name = displayName
       } catch {
         /* ignore */
       }
     }
-    if (displayName && displayName !== existingUser.name) {
-      await setDoc(userRef(uid), { name: displayName }, { merge: true })
-      return { user: { ...existingUser, name: displayName }, status: 'existing' }
+    if (existingPlatform.role === ROLES.MASTER_ADMIN) {
+      return sessionFromParts({ platformUser: existingPlatform })
     }
-    return { user: existingUser, status: 'existing' }
+    const companyId = existingPlatform.companyId
+    if (!companyId) {
+      const legacyUser = await readLegacyCompanyUser(uid)
+      if (legacyUser) {
+        return sessionFromLegacyMember({
+          uid,
+          email: normalizedEmail,
+          name: displayName,
+          phone,
+          legacyUser,
+        })
+      }
+      return { status: 'unauthorized', reason: 'no-company', user: null }
+    }
+    let company = null
+    let companyUser = null
+    try {
+      company = await getCompany(companyId)
+      companyUser = await getCompanyUser(uid, companyId)
+    } catch (err) {
+      if (err?.code === 'permission-denied') {
+        const legacyUser = await readLegacyCompanyUser(uid)
+        if (legacyUser) {
+          return sessionFromLegacyMember({
+            uid,
+            email: normalizedEmail,
+            name: displayName,
+            phone,
+            legacyUser,
+          })
+        }
+        return { status: 'unauthorized', reason: 'no-company', user: null }
+      }
+      throw err
+    }
+    if (companyUser && displayName && displayName !== companyUser.name) {
+      try {
+        await setDoc(userRef(uid, companyId), { name: displayName }, { merge: true })
+        companyUser = { ...companyUser, name: displayName }
+      } catch {
+        /* ignore */
+      }
+    }
+    return sessionFromParts({
+      platformUser: existingPlatform,
+      companyUser,
+      company,
+    })
   }
 
-  // New membership (owner bootstrap / invite) requires a verified mailbox.
-  // Phone-only accounts cannot match email invites (M10).
+  // Existing Shreenathji members (including Master Admin) — before email-verify gate.
+  const legacyUser = await readLegacyCompanyUser(uid)
+  if (legacyUser) {
+    return sessionFromLegacyMember({
+      uid,
+      email: normalizedEmail,
+      name: displayName,
+      phone,
+      legacyUser,
+    })
+  }
+
   if (!emailVerified) {
     if (phone && !normalizedEmail) {
       return { user: null, status: 'unauthorized', reason: 'phone-needs-email' }
@@ -257,89 +734,40 @@ export async function getOrCreateUserOnFirstLogin({ uid, email, name = '', phone
     return { user: null, status: 'unverified' }
   }
 
-  // Business get is member/invite/bootstrap-only (firestore.rules). A
-  // signed-in stranger gets permission-denied when the business already
-  // exists — treat that the same as "business exists, you are not a
-  // member yet" and fall through to the invite check.
-  let business = null
-  let businessDefinitelyExists = false
   try {
-    business = await getBusiness()
-  } catch (err) {
-    if (err?.code === 'permission-denied') {
-      businessDefinitelyExists = true
-    } else {
-      throw err
-    }
-  }
-
-  if (!business && !businessDefinitelyExists) {
-    const batch = writeBatch(db)
-    batch.set(businessRef(), {
-      name: 'Shreenathji Traders',
-      financialYearStart: '04-01',
-      createdByUid: uid,
-      ownerUid: uid,
-      createdAt: serverTimestamp(),
-    })
-    const newUser = {
-      email: normalizedEmail,
-      phone: phone || '',
-      role: 'owner',
-      name: displayName,
-      location: '',
-      createdAt: serverTimestamp(),
-    }
-    batch.set(userRef(uid), newUser)
-    await batch.commit()
-    return { user: { id: uid, ...newUser }, status: 'created-owner' }
-  }
-
-  // Orphan business (created without user doc) — reclaim only if ownerUid
-  // still points at this uid (H6). Legacy docs without ownerUid fall back
-  // to createdByUid.
-  const ownerUid = business?.ownerUid || business?.createdByUid
-  if (business && ownerUid === uid && normalizedEmail) {
-    const newUser = {
-      email: normalizedEmail,
-      phone: phone || '',
-      role: 'owner',
-      name: displayName,
-      location: '',
-      createdAt: serverTimestamp(),
-    }
-    await setDoc(userRef(uid), newUser)
-    if (!business.ownerUid) {
-      try {
-        await setDoc(businessRef(), { ownerUid: uid }, { merge: true })
-      } catch {
-        /* ignore — may need membership first */
-      }
-    }
-    return { user: { id: uid, ...newUser }, status: 'created-owner' }
-  }
-
-  if (normalizedEmail) {
-    const inviteSnap = await getDoc(inviteDocRef(normalizedEmail))
-    if (inviteSnap.exists() && inviteSnap.data().status === 'pending') {
-      const invite = inviteSnap.data()
-      const batch = writeBatch(db)
-      const newUser = {
+    const globalInviteSnap = await getDoc(globalInviteRef(normalizedEmail))
+    if (globalInviteSnap.exists() && globalInviteSnap.data().status === 'pending') {
+      const accepted = await acceptPendingInvite({
+        uid,
         email: normalizedEmail,
-        phone: phone || '',
-        role: invite.role,
-        name: displayName || invite.name || '',
-        location: invite.location || '',
-        createdAt: serverTimestamp(),
-      }
-      batch.set(userRef(uid), newUser)
-      batch.update(inviteDocRef(normalizedEmail), {
-        status: 'accepted',
-        acceptedAt: serverTimestamp(),
+        name: displayName,
+        phone,
+        invite: globalInviteSnap.data(),
+        inviteCompanyId: globalInviteSnap.data().companyId,
       })
-      await batch.commit()
-      return { user: { id: uid, ...newUser }, status: 'created-staff' }
+      return sessionFromParts({ ...accepted, statusHint: 'created-staff' })
     }
+  } catch (err) {
+    if (err?.code !== 'permission-denied') throw err
+  }
+
+  try {
+    const legacyInviteSnap = await getDoc(
+      doc(db, COMPANIES_COLLECTION, LEGACY_COMPANY_ID, 'invites', normalizedEmail),
+    )
+    if (legacyInviteSnap.exists() && legacyInviteSnap.data().status === 'pending') {
+      const accepted = await acceptPendingInvite({
+        uid,
+        email: normalizedEmail,
+        name: displayName,
+        phone,
+        invite: { ...legacyInviteSnap.data(), companyId: LEGACY_COMPANY_ID },
+        inviteCompanyId: LEGACY_COMPANY_ID,
+      })
+      return sessionFromParts(accepted)
+    }
+  } catch (err) {
+    if (err?.code !== 'permission-denied') throw err
   }
 
   return { user: null, status: 'unauthorized' }

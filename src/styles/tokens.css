@@ -719,6 +719,44 @@
     border-top: 1px solid rgba(226, 232, 227, 0.95);
     box-shadow: 0 -8px 28px rgba(15, 28, 24, 0.06);
   }
+
+  .platform-scroll {
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+
+  .platform-reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.5s ease,
+      transform 0.5s ease;
+  }
+  .platform-reveal.is-in {
+    opacity: 1;
+    transform: none;
+  }
+
+  .platform-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.15rem;
+    width: 2.15rem;
+    border-radius: 0.7rem;
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--color-ink-muted);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .platform-icon-btn:hover {
+    background: #fff;
+    color: var(--color-ink);
+    border-color: #cfd8d2;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

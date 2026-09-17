@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import { useLocale } from './context/LocaleContext'
 import LanguageToggle from './components/LanguageToggle'
@@ -15,6 +15,13 @@ import SettingsScreen from './features/settings/SettingsScreen'
 import UserManagementScreen from './features/admin/UserManagementScreen'
 import QueueMonitorScreen from './features/admin/QueueMonitorScreen'
 import ReportsScreen from './features/reports/ReportsScreen'
+import PlatformShell from './features/platform/PlatformShell'
+import PlatformDashboard from './features/platform/PlatformDashboard'
+import PlatformCalendarPage from './features/platform/PlatformCalendarPage'
+import PlatformInbox from './features/platform/PlatformInbox'
+import PlatformProfile from './features/platform/PlatformProfile'
+import CompanyForm from './features/platform/CompanyForm'
+import CompanyDetail from './features/platform/CompanyDetail'
 import { SkeletonPage } from './components/Skeleton'
 import {
   resendEmailVerification,
@@ -40,7 +47,13 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       ? t('auth.unverifiedBody')
       : authReason === 'phone-needs-email'
         ? t('auth.phoneNeedsEmailInvite')
-        : t('auth.unauthorizedBody')
+        : authReason === 'disabled'
+          ? t('auth.disabledBody')
+          : authReason === 'company-gone'
+            ? t('auth.companyGoneBody')
+            : authReason === 'master-bootstrap-blocked'
+              ? t('auth.masterBootstrapBody')
+              : t('auth.unauthorizedBody')
 
   // Auto-send verification email when landing on this screen (skip if just sent).
   useEffect(() => {
@@ -176,7 +189,7 @@ function UnauthorizedScreen({ reason = 'unauthorized' }) {
       <div className="w-full max-w-sm card px-6 py-8 text-center shadow-[var(--shadow-raised)]">
         <p className="section-label text-danger mb-2">{title}</p>
         <p className="text-body text-ink">{body}</p>
-        {reason === 'unverified' && firebaseUser?.email && (
+        {firebaseUser?.email && (
           <p className="text-caption text-ink-muted mt-2 font-medium break-all">
             {firebaseUser.email}
           </p>
@@ -288,31 +301,86 @@ function LoadingScreen() {
   )
 }
 
+function SuspendedScreen() {
+  const { logout, company } = useAuth()
+  const { t } = useLocale()
+  return (
+    <div className="flex min-h-svh flex-col items-center justify-center bg-surface-muted px-4">
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
+      <div className="w-full max-w-sm card px-6 py-8 text-center shadow-[var(--shadow-raised)]">
+        <p className="section-label text-danger mb-2">{t('auth.suspendedTitle')}</p>
+        <p className="text-body text-ink">{t('auth.suspendedBody')}</p>
+        {company?.name && (
+          <p className="text-caption text-ink-muted mt-2 font-medium">{company.name}</p>
+        )}
+        <button type="button" onClick={logout} className="btn-primary w-full mt-5">
+          {t('auth.tryDifferentAccount')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LeaveToPlatform() {
+  const { leaveCompany, inCompany } = useAuth()
+  useEffect(() => {
+    if (inCompany) leaveCompany()
+  }, [inCompany, leaveCompany])
+  return <Navigate to="/platform" replace />
+}
+
+function CompanyAppRoutes() {
+  const { companyId } = useAuth()
+  return (
+    <Routes>
+      <Route element={<AppShell key={companyId || 'company'} />}>
+        <Route index element={<DashboardScreen />} />
+        <Route path="bills" element={<BillsScreen />} />
+        <Route path="dakhla" element={<DakhlaScreen />} />
+        <Route path="vepari-pay" element={<VepariPayScreen />} />
+        <Route path="rojmer" element={<RojmerScreen />} />
+        <Route path="silak" element={<SilakScreen />} />
+        <Route path="reports" element={<ReportsScreen />} />
+        <Route path="settings" element={<SettingsScreen />} />
+        <Route path="admin/users" element={<UserManagementScreen />} />
+        <Route path="admin/queue" element={<QueueMonitorScreen />} />
+      </Route>
+      <Route path="platform/*" element={<LeaveToPlatform />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
+
+function PlatformAppRoutes() {
+  return (
+    <Routes>
+      <Route element={<PlatformShell />}>
+        <Route path="/platform" element={<PlatformDashboard />} />
+        <Route path="/platform/calendar" element={<PlatformCalendarPage />} />
+        <Route path="/platform/inbox" element={<PlatformInbox />} />
+        <Route path="/platform/profile" element={<PlatformProfile />} />
+        <Route path="/platform/companies/new" element={<CompanyForm />} />
+        <Route path="/platform/companies/:companyId" element={<CompanyDetail />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/platform" replace />} />
+    </Routes>
+  )
+}
+
 function App() {
-  const { status } = useAuth()
+  const { status, isMasterAdmin, inCompany } = useAuth()
 
   if (status === 'loading') return <LoadingScreen />
   if (status === 'unauthorized') return <UnauthorizedScreen reason="unauthorized" />
   if (status === 'unverified') return <UnauthorizedScreen reason="unverified" />
+  if (status === 'suspended') return <SuspendedScreen />
   if (status === 'error') return <AuthErrorScreen />
 
   if (status === 'signed-in') {
-    return (
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<DashboardScreen />} />
-          <Route path="bills" element={<BillsScreen />} />
-          <Route path="dakhla" element={<DakhlaScreen />} />
-          <Route path="vepari-pay" element={<VepariPayScreen />} />
-          <Route path="rojmer" element={<RojmerScreen />} />
-          <Route path="silak" element={<SilakScreen />} />
-          <Route path="reports" element={<ReportsScreen />} />
-          <Route path="settings" element={<SettingsScreen />} />
-          <Route path="admin/users" element={<UserManagementScreen />} />
-          <Route path="admin/queue" element={<QueueMonitorScreen />} />
-        </Route>
-      </Routes>
-    )
+    if (isMasterAdmin && !inCompany) return <PlatformAppRoutes />
+    return <CompanyAppRoutes />
   }
 
   return <LoginScreen />

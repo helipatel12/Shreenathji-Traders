@@ -20,27 +20,24 @@ import {
 } from './calc'
 import { findVepari, vepariDisplayName, vepariStableId } from './vepari'
 
-function paymentsOnOrBefore(payments, billId, dateKey) {
+function billPaymentIds(bill) {
+  const ids = new Set()
+  if (bill?.firestoreId) ids.add(String(bill.firestoreId))
+  if (bill?.id != null) ids.add(String(bill.id))
+  return ids
+}
+
+function paymentsOnOrBefore(payments, bill, dateKey) {
+  const ids = billPaymentIds(bill)
+  if (!ids.size) return 0
   return excludeVoided(payments)
-    .filter((p) => p.billId === billId && p.date && p.date <= dateKey)
+    .filter((p) => ids.has(String(p.billId)) && p.date && p.date <= dateKey)
     .reduce((sum, p) => roundCurrency(sum + (p.amount || 0)), 0)
 }
 
 function balanceAsOf(bill, payments, dateKey) {
-  const paid = paymentsOnOrBefore(payments, bill.firestoreId, dateKey)
+  const paid = paymentsOnOrBefore(payments, bill, dateKey)
   return roundCurrency((bill.totalAmount || 0) - paid)
-}
-
-/**
- * Dates when a bill's pending should appear: bill date + each payment date.
- */
-function pendingDatesForBill(bill, payments) {
-  const dates = new Set()
-  if (bill.date) dates.add(bill.date)
-  for (const p of excludeVoided(payments)) {
-    if (p.billId === bill.firestoreId && p.date) dates.add(p.date)
-  }
-  return [...dates].sort()
 }
 
 export function buildSilakLedgerEntries({
@@ -59,7 +56,6 @@ export function buildSilakLedgerEntries({
   const entryLabel = t ? t('bills.entryNumberLabel') : 'No.'
   const commissionLabel = t ? t('silak.commissionTotalLabel') : 'Commission'
   const shesTolaiLabel = t ? t('silak.shesTolaiTotalLabel') : 'Shes + tolai'
-  const pendingLabel = t ? t('silak.pendingRojmerLabel') : 'Pending (rojmer)'
   const chequeLabel = t ? t('silak.clearedChequeLabel') : 'Cleared cheque'
 
   for (const bill of bills) {
@@ -120,26 +116,22 @@ export function buildSilakLedgerEntries({
       })
     }
 
-    // Khedut rojmer pending — one line per bill on its latest activity day
-    // (bill date or last payment date). Example: ₹42,450 − pay ₹2,450 → ₹40,000.
-    const farmer = bill.farmerName || '—'
-    const note = `${entryLabel} ${bill.entryNumber}`
-    const activityDates = pendingDatesForBill(bill, payments)
-    const asOfDate = activityDates[activityDates.length - 1]
-    if (asOfDate) {
-      const pending = balanceAsOf(bill, payments, asOfDate)
-      if (pending > 0.005) {
-        auto.push({
-          date: asOfDate,
-          side: 'jama',
-          label: `${pendingLabel} — ${note} — ${farmer}`.trim(),
-          amount: pending,
-          isManual: false,
-          createdBy: bill.createdBy || null,
-          createdByName: bill.createdByName || null,
-          key: `jama-pending-${bill.firestoreId || bill.id}`,
-        })
-      }
+    // One jama line per unpaid bill, named like rojmer (khedut + note).
+    // Stays on the bill date. Same-day payments reduce the amount.
+    const pending = balanceAsOf(bill, payments, bill.date)
+    if (pending > 0.005) {
+      const farmer = String(bill.farmerName || '').trim() || '—'
+      const note = bill.entryNumber != null ? `${entryLabel} ${bill.entryNumber}` : ''
+      auto.push({
+        date: bill.date,
+        side: 'jama',
+        label: note ? `${farmer} · ${note}` : farmer,
+        amount: pending,
+        isManual: false,
+        createdBy: bill.createdBy || null,
+        createdByName: bill.createdByName || null,
+        key: `jama-pending-${bill.firestoreId || bill.id}`,
+      })
     }
   }
 
@@ -159,7 +151,7 @@ export function buildSilakLedgerEntries({
   for (const payment of excludeVoided(payments)) {
     if (!payment.date || !payment.billId) continue
     if (String(payment.type || '').toLowerCase() !== 'cheque') continue
-    const bill = bills.find((b) => b.firestoreId === payment.billId)
+    const bill = bills.find((b) => billPaymentIds(b).has(String(payment.billId)))
     if (!bill || isRecordVoided(bill)) continue
     const farmer = bill.farmerName || ''
     auto.push({

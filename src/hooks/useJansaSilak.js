@@ -25,6 +25,14 @@ import { findVepari } from '../utils/vepari'
 import { eachDateKeyInRange } from '../utils/dates'
 import { buildSilakLedgerEntries } from '../utils/silakLedger'
 
+function pendingTotalFromEntries(entries) {
+  return roundCurrency(
+    (entries || [])
+      .filter((e) => String(e.key || '').startsWith('jama-pending-'))
+      .reduce((sum, e) => sum + (e.amount || 0), 0),
+  )
+}
+
 function computeDayFeeTotals(dayBills, veparis, business) {
   const lines = dayBills.map((bill) => {
     const vepari = findVepari(veparis, bill.vepariId)
@@ -130,6 +138,7 @@ export function useJansaSilak(selectedDate) {
           jamaTotal,
           udharTotal,
           closingBalance,
+          pendingTotal: pendingTotalFromEntries(dayEntries),
           ...fees,
         }
       }
@@ -163,14 +172,17 @@ export function useJansaSilakRange(fromDate, toDate) {
     const results = []
     let commissionTotal = 0
     let shesTolaiTotal = 0
+    let pendingTotal = 0
     for (const dateKey of dateKeys) {
       const dayEntries = byDate.get(dateKey) || []
       const { jamaTotal, udharTotal, closingBalance } = computeSilakDay(dayEntries, runningBalance)
       if (dateKey >= fromDate) {
         const dayBills = bills.filter((b) => b.date === dateKey)
         const fees = computeDayFeeTotals(dayBills, veparis, business)
+        const dayPending = pendingTotalFromEntries(dayEntries)
         commissionTotal = roundCurrency(commissionTotal + fees.commissionTotal)
         shesTolaiTotal = roundCurrency(shesTolaiTotal + fees.shesTolaiTotal)
+        pendingTotal = roundCurrency(pendingTotal + dayPending)
         results.push({
           date: dateKey,
           entries: dayEntries.slice().sort((a, b) => (a.key < b.key ? -1 : 1)),
@@ -178,6 +190,7 @@ export function useJansaSilakRange(fromDate, toDate) {
           jamaTotal,
           udharTotal,
           closingBalance,
+          pendingTotal: dayPending,
           ...fees,
         })
       }
@@ -185,7 +198,7 @@ export function useJansaSilakRange(fromDate, toDate) {
     }
     return {
       days: results,
-      rangeFees: { commissionTotal, shesTolaiTotal },
+      rangeFees: { commissionTotal, shesTolaiTotal, pendingTotal },
     }
   }, [allEntries, bills, veparis, business, earliestDate, fromDate, toDate])
 

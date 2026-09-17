@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import {
   Home,
   Receipt,
@@ -50,7 +50,7 @@ function NavLabel({ children, collapsed }) {
 }
 
 export default function AppShell() {
-  const { isOwner, isCa, logout } = useAuth()
+  const { isOwner, isCa, isMasterAdmin, logout, company } = useAuth()
   const { t, lang } = useLocale()
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => {
@@ -71,7 +71,16 @@ export default function AppShell() {
 
   useEffect(() => startOfflineFlushListeners(), [])
 
-  const brandPrimary = lang === 'gu' ? t('common.businessNameGu') : t('common.businessNameEn')
+  const brandPrimary =
+    company?.name || (lang === 'gu' ? t('common.businessNameGu') : t('common.businessNameEn'))
+
+  const panelLabel = isMasterAdmin
+    ? t('roles.master_admin')
+    : isOwner
+      ? t('nav.adminPanel')
+      : isCa
+        ? t('nav.caPanel')
+        : t('nav.staffPanel')
 
   const mainTabs = [
     { to: '/', label: t('nav.home'), Icon: Home, end: true },
@@ -90,12 +99,6 @@ export default function AppShell() {
         { to: '/admin/queue', label: t('nav.queueMonitor'), Icon: ListTodo },
       ]
     : []
-
-  const panelLabel = isOwner
-    ? t('nav.adminPanel')
-    : isCa
-      ? t('nav.caPanel')
-      : t('nav.staffPanel')
 
   const allNav = [
     ...mainTabs,
@@ -239,6 +242,20 @@ export default function AppShell() {
         </header>
 
         <main className="flex-1 px-4 pt-5 pb-28 sm:px-6 md:px-8 md:pt-8 md:pb-10">
+          {isMasterAdmin && (
+            <div
+              className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3"
+              role="status"
+            >
+              <p className="text-caption text-accent font-semibold">{t('platform.masterViewBanner')}</p>
+              <Link
+                to="/platform"
+                className="text-caption font-semibold text-accent underline underline-offset-2"
+              >
+                {t('platform.backToPlatform')}
+              </Link>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

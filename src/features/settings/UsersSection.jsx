@@ -58,7 +58,7 @@ export default function UsersSection() {
   const pendingInvites = invites.filter((i) => i.status === 'pending')
 
   function roleLabel(role) {
-    return t(`roles.${role}`) ?? role
+    return t(`roles.${role === 'owner' ? 'company_admin' : role}`) ?? role
   }
 
   async function handleInvite(values) {

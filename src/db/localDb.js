@@ -1,9 +1,12 @@
 import Dexie from 'dexie'
 import { dedupeTableByFirestoreId } from '../utils/syncHelpers'
 
-/** Active Dexie instance — switched per signed-in uid (C2). */
+const LEGACY_COMPANY_ID = import.meta.env.VITE_BUSINESS_ID || 'shreenath-traders'
+
+/** Active Dexie instance — switched per signed-in uid + company (tenant isolation). */
 let currentDb = null
 let currentUid = null
+let currentCompanyId = null
 
 function applySchema(database) {
   database.version(1).stores({
@@ -28,13 +31,20 @@ function applySchema(database) {
       await dedupeTableByFirestoreId(tx.table('silakEntries'))
     })
 
-  // Vepari settlement payments (mirror of farmer `payments` / Rojmer).
   database.version(3).stores({
     veparis: '++id, firestoreId, name, syncStatus',
     bills: '++id, firestoreId, vepariId, date, createdBy, locationId, syncStatus, entryNumber',
     payments: '++id, firestoreId, billId, date, syncStatus',
     vepariPayments: '++id, firestoreId, billId, date, syncStatus',
     silakEntries: '++id, firestoreId, date, side, isManual, syncStatus',
+  })
+
+  database.version(4).stores({
+    veparis: '++id, firestoreId, name, companyId, syncStatus',
+    bills: '++id, firestoreId, vepariId, date, createdBy, locationId, companyId, syncStatus, entryNumber',
+    payments: '++id, firestoreId, billId, date, companyId, syncStatus',
+    vepariPayments: '++id, firestoreId, billId, date, companyId, syncStatus',
+    silakEntries: '++id, firestoreId, date, side, isManual, companyId, syncStatus',
   })
 }
 
@@ -44,16 +54,22 @@ function createDb(name) {
   return database
 }
 
-/**
- * Proxy so existing `import { db }` / `localDb.bills` keeps working once a
- * user DB is open. Throws if accessed before openLocalDbForUser().
- */
+export function localDbName(uid, companyId) {
+  const safeUid = String(uid || '').trim()
+  const safeCompany = String(companyId || '').trim()
+  if (safeCompany && safeCompany !== LEGACY_COMPANY_ID) {
+    return `st-${safeCompany}-${safeUid}`
+  }
+  return `shreenath-traders-${safeUid}`
+}
+
 export const db = new Proxy(
   {},
   {
     get(_target, prop) {
       if (prop === 'isOpen') return () => Boolean(currentDb?.isOpen?.())
       if (prop === 'currentUid') return currentUid
+      if (prop === 'currentCompanyId') return currentCompanyId
       if (!currentDb) {
         throw new Error('Local DB is not open — sign in first')
       }
@@ -67,10 +83,18 @@ export function getLocalDbUid() {
   return currentUid
 }
 
-export async function openLocalDbForUser(uid) {
+export function getLocalDbCompanyId() {
+  return currentCompanyId
+}
+
+export async function openLocalDbForUser(uid, companyId) {
   const safeUid = String(uid || '').trim()
+  const safeCompany = String(companyId || '').trim()
   if (!safeUid) throw new Error('openLocalDbForUser requires uid')
-  if (currentUid === safeUid && currentDb?.isOpen()) return currentDb
+  if (!safeCompany) throw new Error('openLocalDbForUser requires companyId')
+  if (currentUid === safeUid && currentCompanyId === safeCompany && currentDb?.isOpen()) {
+    return currentDb
+  }
 
   if (currentDb) {
     try {
@@ -80,10 +104,12 @@ export async function openLocalDbForUser(uid) {
     }
     currentDb = null
     currentUid = null
+    currentCompanyId = null
   }
 
   currentUid = safeUid
-  currentDb = createDb(`shreenath-traders-${safeUid}`)
+  currentCompanyId = safeCompany
+  currentDb = createDb(localDbName(safeUid, safeCompany))
   await currentDb.open()
   return currentDb
 }
@@ -98,6 +124,7 @@ export async function closeLocalDb() {
   }
   currentDb = null
   currentUid = null
+  currentCompanyId = null
 }
 
 export default db

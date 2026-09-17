@@ -22,25 +22,31 @@ import { auth } from './config'
 const EMAIL_LINK_KEY = 'st_email_for_sign_in'
 
 /**
- * Continue URL for Firebase email actions. Always use the app origin root
- * (not the current deep path) so Authorized Domains checks stay reliable.
- * Prefer localhost over 127.0.0.1 — only "localhost" is whitelisted by default.
+ * Continue URL host for Firebase email actions.
+ * Prefer localhost over 127.0.0.1 — only "localhost" is authorized by default.
  */
-function appContinueUrl(extraQuery = '') {
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  const q = String(extraQuery || '').replace(/^\?/, '')
-  return q ? `${origin}/?${q}` : `${origin}/`
+function appOrigin() {
+  if (typeof window === 'undefined') return ''
+  try {
+    const url = new URL(window.location.href)
+    const host = url.hostname === '127.0.0.1' ? 'localhost' : url.hostname
+    const port = url.port ? `:${url.port}` : ''
+    return `${url.protocol}//${host}${port}`
+  } catch {
+    return window.location.origin
+  }
 }
 
-/** Shared ActionCodeSettings for verification / reset (web handler first). */
-function emailActionSettings(mode) {
-  const verifyInApp = mode === 'verifyEmail'
+/** Shared landing page for reset / verify / email-link (Firebase appends oobCode). */
+function appContinueUrl() {
+  return `${appOrigin()}/auth/action`
+}
+
+/** Shared ActionCodeSettings so inbox buttons open this app, not a dead hosted page. */
+function emailActionSettings() {
   return {
-    url: appContinueUrl(mode ? `mode=${mode}` : ''),
-    // verifyEmail: open this app with oobCode so the user can paste/enter
-    // the code on the website (or auto-apply when they open the link).
-    // resetPassword: Firebase hosted page still works; user can also paste code.
-    handleCodeInApp: verifyInApp,
+    url: appContinueUrl(),
+    handleCodeInApp: true,
   }
 }
 
@@ -69,21 +75,46 @@ export function wasVerificationEmailSentRecently(email, withinMs = 10 * 60 * 100
   }
 }
 
+function decodeParam(value) {
+  try {
+    return decodeURIComponent(String(value || ''))
+  } catch {
+    return String(value || '')
+  }
+}
+
 /**
- * Pull Firebase oobCode from a pasted link or raw code.
- * Emails contain …?mode=verifyEmail&oobCode=XXXX — users may paste either.
+ * Pull Firebase oobCode from a pasted inbox link or raw token.
+ * Emails contain …?mode=resetPassword&oobCode=XXXX — users may paste either.
  */
 export function extractOobCode(input) {
-  const raw = String(input || '').trim()
+  const raw = String(input || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (!raw) return ''
-  const match = raw.match(/[?&#]oobCode=([^&#\s]+)/i)
-  if (match?.[1]) {
+
+  const fromText = (text) => {
+    const match = String(text || '').match(/[?&#]oobCode=([^&#\s]+)/i)
+    return match?.[1] ? decodeParam(match[1]) : ''
+  }
+
+  const direct = fromText(raw)
+  if (direct) return direct
+
+  if (/^https?:\/\//i.test(raw)) {
     try {
-      return decodeURIComponent(match[1])
+      const url = new URL(raw)
+      const nested =
+        url.searchParams.get('oobCode') ||
+        fromText(decodeParam(url.searchParams.get('continueUrl') || '')) ||
+        fromText(decodeParam(url.searchParams.get('link') || ''))
+      if (nested) return nested
     } catch {
-      return match[1]
+      /* fall through */
     }
   }
+
   return raw
 }
 
@@ -146,7 +177,7 @@ export async function signUp(email, password) {
     password,
   )
   // Do not swallow — callers need to show why the inbox stayed empty.
-  await sendEmailVerification(credential.user, emailActionSettings('verifyEmail'))
+  await sendEmailVerification(credential.user, emailActionSettings())
   markVerificationEmailSent(credential.user.email)
   return credential.user
 }
@@ -155,7 +186,7 @@ export async function resendEmailVerification() {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
   if (user.emailVerified) return
-  await sendEmailVerification(user, emailActionSettings('verifyEmail'))
+  await sendEmailVerification(user, emailActionSettings())
   markVerificationEmailSent(user.email)
 }
 
@@ -180,24 +211,55 @@ export async function changeAuthEmail(newEmail) {
 
 export async function sendPasswordReset(email) {
   const trimmed = String(email || '').trim()
-  await sendPasswordResetEmail(auth, trimmed, emailActionSettings('resetPassword'))
+  try {
+    await sendPasswordResetEmail(auth, trimmed, emailActionSettings())
+  } catch (err) {
+    const code = String(err?.code || '')
+    // Still send the inbox mail if this origin is not yet in Authorized domains.
+    if (code.includes('unauthorized-continue-uri') || code.includes('invalid-continue-uri')) {
+      await sendPasswordResetEmail(auth, trimmed)
+      return
+    }
+    throw err
+  }
 }
 
 /** Returns the account email for a valid password-reset oobCode. */
-export async function verifyResetCode(oobCode) {
-  return verifyPasswordResetCode(auth, String(oobCode || '').trim())
+export async function verifyResetCode(codeOrLink) {
+  const oobCode = extractOobCode(codeOrLink)
+  if (!oobCode || oobCode.length < 8) {
+    const err = new Error('Invalid reset code')
+    err.code = 'auth/invalid-action-code'
+    throw err
+  }
+  return verifyPasswordResetCode(auth, oobCode)
 }
 
-export async function confirmResetPassword(oobCode, newPassword) {
-  await confirmPasswordReset(auth, String(oobCode || '').trim(), newPassword)
+export async function confirmResetPassword(codeOrLink, newPassword) {
+  const oobCode = extractOobCode(codeOrLink)
+  if (!oobCode || oobCode.length < 8) {
+    const err = new Error('Invalid reset code')
+    err.code = 'auth/invalid-action-code'
+    throw err
+  }
+  await confirmPasswordReset(auth, oobCode, newPassword)
 }
 
 /** Apply email-verification oobCode from the inbox link. */
 export async function applyEmailVerificationCode(oobCode) {
-  await applyActionCode(auth, String(oobCode || '').trim())
+  await applyActionCode(auth, extractOobCode(oobCode) || String(oobCode || '').trim())
   if (auth.currentUser) {
     await auth.currentUser.reload()
   }
+}
+
+function paramsFromSearch(params) {
+  const mode = params.get('mode') || ''
+  const oobCode =
+    params.get('oobCode') ||
+    extractOobCode(params.get('link') || '') ||
+    extractOobCode(params.get('continueUrl') || '')
+  return { mode, oobCode }
 }
 
 /** Read Firebase action params from the current URL (reset / verify / sign-in). */
@@ -205,10 +267,12 @@ export function getAuthActionFromUrl() {
   if (typeof window === 'undefined') return null
   try {
     const url = new URL(window.location.href)
-    const mode = url.searchParams.get('mode') || ''
-    const oobCode = url.searchParams.get('oobCode') || ''
-    if (!mode && !oobCode) return null
-    return { mode, oobCode }
+    let parsed = paramsFromSearch(url.searchParams)
+    if (!parsed.mode && !parsed.oobCode && url.hash.length > 1) {
+      parsed = paramsFromSearch(new URLSearchParams(url.hash.replace(/^#/, '')))
+    }
+    if (!parsed.mode && !parsed.oobCode) return null
+    return parsed
   } catch {
     return null
   }
@@ -217,12 +281,10 @@ export function getAuthActionFromUrl() {
 export function clearAuthActionFromUrl() {
   try {
     const url = new URL(window.location.href)
-    url.searchParams.delete('mode')
-    url.searchParams.delete('oobCode')
-    url.searchParams.delete('apiKey')
-    url.searchParams.delete('lang')
-    url.searchParams.delete('continueUrl')
-    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash)
+    ;['mode', 'oobCode', 'apiKey', 'lang', 'continueUrl', 'link'].forEach((key) => {
+      url.searchParams.delete(key)
+    })
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}`)
   } catch {
     /* ignore */
   }
@@ -231,10 +293,7 @@ export function clearAuthActionFromUrl() {
 export async function sendEmailSignInLink(email) {
   const trimmed = email.trim()
   // Email-link sign-in requires handleCodeInApp: true.
-  const actionCodeSettings = {
-    url: appContinueUrl(),
-    handleCodeInApp: true,
-  }
+  const actionCodeSettings = emailActionSettings()
   await sendSignInLinkToEmail(auth, trimmed, actionCodeSettings)
   try {
     window.localStorage.setItem(EMAIL_LINK_KEY, trimmed)

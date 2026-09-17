@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
+import { displayRoleKey } from '../../utils/roles'
 import { useDashboardRange, DASHBOARD_PRESETS } from '../../hooks/useDashboardSummary'
 import { useLocale } from '../../context/LocaleContext'
 import { todayKeyIST } from '../../utils/dates'
@@ -39,7 +40,7 @@ function formatYardDate(dateKey, localeTag) {
 const RANGE_OPTIONS = DASHBOARD_PRESETS
 
 export default function DashboardScreen() {
-  const { user, role, canWrite, isOwner, isCa } = useAuth()
+  const { user, role, canWrite, isOwner, isCa, company } = useAuth()
   const { t, formatCurrency, formatDigits, lang } = useLocale()
   const {
     loading,
@@ -95,7 +96,7 @@ export default function DashboardScreen() {
     [t, incomeTotal, expenseTotal, profitTotal, rojmerPendingAmount, silakPosition],
   )
   const roleLine = [
-    role ? t(`roles.${role}`) : '',
+    role ? t(`roles.${displayRoleKey(role)}`) : '',
     location,
     isOwner ? t('nav.adminPanel') : isCa ? t('nav.caPanel') : t('nav.staffPanel'),
   ]
@@ -153,7 +154,7 @@ export default function DashboardScreen() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 pl-3 border-l-[3px] border-[#b3413a]">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-              {t('common.businessNameEn')}
+              {company?.name || t('common.businessNameEn')}
             </p>
             <h1 className="mt-1 text-2xl sm:text-[1.75rem] font-display font-bold text-ink tracking-tight">
               {t(greetingKey())}

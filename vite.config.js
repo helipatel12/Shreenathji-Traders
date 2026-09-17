@@ -49,6 +49,12 @@ export default defineConfig({
         // persistence + Dexie (src/db) handle data; this just handles
         // the static shell per architecture.md's PWA layer.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        globIgnores: [
+          '**/gujarati-font*.js',
+          '**/pdf-*.js',
+          '**/excel-*.js',
+          '**/zip-*.js',
+        ],
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
@@ -66,4 +72,17 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('notoSansGujaratiFont')) return 'gujarati-font'
+          if (id.includes('node_modules/jspdf') || id.includes('jspdf-autotable')) return 'pdf'
+          if (id.includes('node_modules/exceljs')) return 'excel'
+          if (id.includes('node_modules/jszip')) return 'zip'
+          return undefined
+        },
+      },
+    },
+  },
 })

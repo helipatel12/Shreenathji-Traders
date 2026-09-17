@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { doc, onSnapshot, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { vepariCollectionRef, vepariDocRef } from '../firebase/firestore'
+import { vepariCollectionRef, vepariDocRef, stampCompany } from '../firebase/firestore'
 import {
   applyCollectionSnapshot,
   dedupeTableByFirestoreId,
@@ -57,11 +57,11 @@ export function useVeparis() {
       return existingSame.id
     }
 
-    const payload = {
+    const payload = stampCompany({
       name: trimmedName,
       village: trimmedVillage,
       customRates: customRates || null,
-    }
+    })
     const ref = doc(vepariCollectionRef())
     const localId = await localDb.veparis.add({
       ...payload,

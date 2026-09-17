@@ -1,47 +1,67 @@
-// Staff/CA invites (Phase 8) — owner-only, live Firestore, no offline
-// queueing (same reasoning as useBusiness.js: this is desk-side admin
-// work, not field data entry).
-//
-// The person on the OTHER end of an invite — the not-yet-a-member
-// invitee checking "was I invited?" — is handled separately in
-// firebase/firestore.js's getOrCreateUserOnFirstLogin, not here; this
-// hook is purely the owner's side of managing the invite list.
+// Staff/CA invites — company-admin only. Also writes a top-level
+// invites/{email} doc so the invitee can find their company without
+// knowing the company id (Spark plan, no Admin SDK).
 
 import { useEffect, useState } from 'react'
-import { onSnapshot, setDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { onSnapshot, deleteDoc, writeBatch, serverTimestamp, getDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { BUSINESS_ID, inviteCollectionRef, inviteDocRef } from '../firebase/firestore'
+import {
+  globalInviteRef,
+  inviteCollectionRef,
+  inviteDocRef,
+} from '../firebase/firestore'
+import { useAuth } from './useAuth'
 
 export function useInvites() {
+  const { companyId } = useAuth()
   const [invites, setInvites] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(inviteCollectionRef(), (snap) => {
+    if (!companyId) {
+      setInvites([])
+      setLoading(false)
+      return undefined
+    }
+    const unsubscribe = onSnapshot(inviteCollectionRef(companyId), (snap) => {
       setInvites(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
       setLoading(false)
     })
     return unsubscribe
-  }, [])
+  }, [companyId])
 
   async function addInvite({ email, role, location, invitedBy }) {
-    const ref = inviteDocRef(email)
-    await setDoc(ref, {
-      email: email.trim().toLowerCase(),
+    if (!companyId) throw new Error('No company selected')
+    if (role !== 'staff' && role !== 'ca') throw new Error('INVALID_INVITE_ROLE')
+    const emailKey = String(email || '').trim().toLowerCase()
+    const payload = {
+      email: emailKey,
+      companyId,
       role,
       location: location || '',
       status: 'pending',
       invitedBy,
       invitedAt: serverTimestamp(),
-    })
+    }
+    let existing = null
+    try {
+      existing = await getDoc(globalInviteRef(emailKey))
+    } catch {
+      existing = null
+    }
+    if (existing?.exists() && existing.data().status === 'pending' && existing.data().companyId !== companyId) {
+      const err = new Error('INVITE_EMAIL_BUSY')
+      err.code = 'INVITE_EMAIL_BUSY'
+      throw err
+    }
+    const batch = writeBatch(db)
+    batch.set(inviteDocRef(emailKey, companyId), payload)
+    batch.set(globalInviteRef(emailKey), payload)
+    await batch.commit()
   }
 
-  /**
-   * Hard-delete invite from Firestore (pending list + DB).
-   * Uses the exact doc id from the snapshot, and also the lowercased
-   * email path so older/mismatched ids cannot linger.
-   */
   async function revokeInvite(inviteOrEmail) {
+    if (!companyId) throw new Error('No company selected')
     const rawId =
       typeof inviteOrEmail === 'string'
         ? String(inviteOrEmail || '').trim()
@@ -55,7 +75,6 @@ export function useInvites() {
       .trim()
       .toLowerCase()
 
-    // Optimistic UI — drop from pending list immediately.
     setInvites((prev) =>
       prev.filter((i) => {
         const id = String(i.id || '')
@@ -66,23 +85,21 @@ export function useInvites() {
       }),
     )
 
-    // Exact snapshot id (may already be lowercased).
-    await deleteDoc(doc(db, 'businesses', BUSINESS_ID, 'invites', rawId))
-    // Canonical lowercased path — no-op if same id or already gone.
-    if (lower !== rawId) {
-      try {
-        await deleteDoc(inviteDocRef(lower))
-      } catch {
-        /* ignore */
-      }
-    }
-    if (emailField && emailField !== lower && emailField !== rawId) {
-      try {
-        await deleteDoc(inviteDocRef(emailField))
-      } catch {
-        /* ignore */
-      }
-    }
+    const keys = [...new Set([rawId, lower, emailField].filter(Boolean))]
+    await Promise.all(
+      keys.map(async (key) => {
+        try {
+          await deleteDoc(inviteDocRef(key, companyId))
+        } catch {
+          /* ignore */
+        }
+        try {
+          await deleteDoc(globalInviteRef(key))
+        } catch {
+          /* ignore */
+        }
+      }),
+    )
   }
 
   return { invites, loading, addInvite, revokeInvite }

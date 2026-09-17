@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { paymentCollectionRef, paymentDocRef } from '../firebase/firestore'
+import { paymentCollectionRef, paymentDocRef, stampCompany } from '../firebase/firestore'
 import { diffFields } from '../utils/editHistory'
 import { onLocalDataChanged } from '../utils/localDataEvents'
 import {
@@ -59,7 +59,7 @@ export function usePayments() {
   }, [refreshLocal])
 
   async function addPayment({ billId, amount, type, date, createdBy, createdByName }) {
-    const payload = {
+    const payload = stampCompany({
       billId,
       amount: parseLocaleNumber(amount),
       type,
@@ -67,7 +67,7 @@ export function usePayments() {
       createdBy,
       createdByName: String(createdByName || '').trim() || null,
       editHistory: [],
-    }
+    })
     const ref = doc(paymentCollectionRef())
     const createdAtLocal = Date.now()
     const localId = await localDb.payments.add({

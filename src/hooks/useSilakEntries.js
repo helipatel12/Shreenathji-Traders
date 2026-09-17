@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db as localDb } from '../db/localDb'
-import { silakEntryCollectionRef, silakEntryDocRef } from '../firebase/firestore'
+import { silakEntryCollectionRef, silakEntryDocRef, stampCompany } from '../firebase/firestore'
 import {
   applyCollectionSnapshot,
   dedupeTableByFirestoreId,
@@ -54,7 +54,7 @@ export function useSilakEntries() {
   }, [refreshLocal])
 
   async function addEntry({ date, side, label, amount, createdBy, createdByName }) {
-    const payload = {
+    const payload = stampCompany({
       date,
       side,
       label: label.trim(),
@@ -62,7 +62,7 @@ export function useSilakEntries() {
       isManual: true,
       createdBy,
       createdByName: String(createdByName || '').trim() || null,
-    }
+    })
     const ref = doc(silakEntryCollectionRef())
     const localId = await localDb.silakEntries.add({
       ...payload,
