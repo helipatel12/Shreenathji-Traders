@@ -7,12 +7,15 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Plus, Trash2 } from 'lucide-react'
 import { useVeparis } from '../../hooks/useVeparis'
+import { useBills } from '../../hooks/useBills'
 import { computeLineAmount, computeBillTotal } from '../../utils/calc'
 import { todayKeyIST } from '../../utils/dates'
 import { findVepari, vepariStableId } from '../../utils/vepari'
+import { farmerDirectory, lastVillageForName } from '../../utils/farmers'
 import { useLocale } from '../../context/LocaleContext'
 import { preprocessNumber, parseLocaleNumber, convertIndicDigits } from '../../utils/numbers'
 import VepariSelect from '../../components/VepariSelect'
+import SearchableSelect from '../../components/SearchableSelect'
 import guCatalog from '../../locales/gu.json'
 
 const CUSTOM = guCatalog.bills.customOptionValue
@@ -52,6 +55,16 @@ export default function BillForm({
 }) {
   const { t, formatCurrency } = useLocale()
   const { veparis } = useVeparis()
+  const { bills } = useBills()
+  const directory = useMemo(() => farmerDirectory(bills), [bills])
+  const farmerOptions = useMemo(
+    () => directory.names.map((name) => ({ value: name, label: name })),
+    [directory],
+  )
+  const villageOptions = useMemo(
+    () => directory.villages.map((village) => ({ value: village, label: village })),
+    [directory],
+  )
   const goodsLabels = t('bills.goodsTypes')
   const isEdit = initialValues?.entryNumber != null && initialValues.entryNumber !== ''
   const entryNumberEditable = !isEdit || canEditEntryNumber
@@ -237,7 +250,31 @@ export default function BillForm({
             <label htmlFor="farmerName" className="block text-body text-ink font-medium mb-1.5">
               {t('bills.farmerNameLabel')}
             </label>
-            <input id="farmerName" className={inputClasses} {...register('farmerName')} />
+            <Controller
+              name="farmerName"
+              control={control}
+              render={({ field }) => (
+                <SearchableSelect
+                  id="farmerName"
+                  options={farmerOptions}
+                  value={field.value}
+                  onChange={(name) => {
+                    field.onChange(name)
+                    const village = lastVillageForName(directory, name)
+                    if (village) {
+                      setValue('farmerVillage', village, { shouldValidate: true })
+                    }
+                  }}
+                  disabled={readOnly}
+                  allowEmpty={false}
+                  allowCreate
+                  placeholder={t('bills.selectFarmer')}
+                  searchPlaceholder={t('bills.searchFarmer')}
+                  createLabel={(value) => t('bills.useTypedValue', { value })}
+                  aria-label={t('bills.farmerNameLabel')}
+                />
+              )}
+            />
             {errors.farmerName && (
               <p className="text-caption text-danger mt-1">{errors.farmerName.message}</p>
             )}
@@ -246,7 +283,25 @@ export default function BillForm({
             <label htmlFor="farmerVillage" className="block text-body text-ink font-medium mb-1.5">
               {t('bills.farmerVillageLabel')}
             </label>
-            <input id="farmerVillage" className={inputClasses} {...register('farmerVillage')} />
+            <Controller
+              name="farmerVillage"
+              control={control}
+              render={({ field }) => (
+                <SearchableSelect
+                  id="farmerVillage"
+                  options={villageOptions}
+                  value={field.value}
+                  onChange={field.onChange}
+                  disabled={readOnly}
+                  allowEmpty={false}
+                  allowCreate
+                  placeholder={t('bills.selectVillage')}
+                  searchPlaceholder={t('bills.searchVillage')}
+                  createLabel={(value) => t('bills.useTypedValue', { value })}
+                  aria-label={t('bills.farmerVillageLabel')}
+                />
+              )}
+            />
             {errors.farmerVillage && (
               <p className="text-caption text-danger mt-1">{errors.farmerVillage.message}</p>
             )}

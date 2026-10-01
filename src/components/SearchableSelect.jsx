@@ -17,6 +17,8 @@ export default function SearchableSelect({
   disabled = false,
   compact = false,
   searchPlaceholder,
+  allowCreate = false,
+  createLabel,
   'aria-label': ariaLabel,
 }) {
   const autoId = useId()
@@ -28,23 +30,45 @@ export default function SearchableSelect({
   const [highlight, setHighlight] = useState(0)
   const [panelStyle, setPanelStyle] = useState(null)
 
-  const selected = useMemo(
-    () => options.find((o) => String(o.value) === String(value)) || null,
-    [options, value],
-  )
+  const selected = useMemo(() => {
+    const found = options.find((o) => String(o.value) === String(value))
+    if (found) return found
+    const raw = String(value || '').trim()
+    if (raw) return { value: raw, label: raw }
+    return null
+  }, [options, value])
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const list = allowEmpty
+    const rawQuery = query.trim()
+    const q = rawQuery.toLowerCase()
+    let list = allowEmpty
       ? [{ value: '', label: emptyLabel, searchText: emptyLabel }, ...options]
-      : options
-    if (!q) return list
-    return list.filter((o) => {
-      if (o.value === '') return emptyLabel.toLowerCase().includes(q) || q === '—'
-      const hay = String(o.searchText || o.label || '').toLowerCase()
-      return hay.includes(q)
-    })
-  }, [options, query, allowEmpty, emptyLabel])
+      : [...options]
+    if (q) {
+      list = list.filter((o) => {
+        if (o.value === '') return emptyLabel.toLowerCase().includes(q) || q === '—'
+        const hay = String(o.searchText || o.label || '').toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    if (allowCreate && rawQuery) {
+      const exists = options.some(
+        (o) =>
+          String(o.value).toLowerCase() === q || String(o.label).toLowerCase() === q,
+      )
+      if (!exists) {
+        list = [
+          {
+            value: rawQuery,
+            label: createLabel ? createLabel(rawQuery) : rawQuery,
+            searchText: rawQuery,
+          },
+          ...list.filter((o) => o.value !== ''),
+        ]
+      }
+    }
+    return list
+  }, [options, query, allowEmpty, emptyLabel, allowCreate, createLabel])
 
   useLayoutEffect(() => {
     if (!open || !rootRef.current) {
@@ -127,7 +151,11 @@ export default function SearchableSelect({
     if (e.key === 'Enter') {
       e.preventDefault()
       const opt = filtered[highlight]
-      if (opt) pick(opt.value)
+      if (opt) {
+        pick(opt.value)
+        return
+      }
+      if (allowCreate && query.trim()) pick(query.trim())
     }
   }
 
